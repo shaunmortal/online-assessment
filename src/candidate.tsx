@@ -9,7 +9,7 @@ import { pythonLoaded, runCases, type CaseResult } from './lib/runner'
 
 interface CodeDraft { code: string; lang: CodeLang }
 import { BLUEPRINT, CODE_LANGS, PAPER, SECTIONS, rosterEntry, seatLabel, type CodeLang, type CodingQuestion, type McqQuestion, type Question } from './data/paper'
-import { QUESTIONS, loadPaper, paperInfo, questionById } from './lib/paperClient'
+import { QUESTIONS, loadPaper, paperInfo, preloadPaper, questionById } from './lib/paperClient'
 import { DOB_KEY, messagesFor, sessionReport, type ExamApi, type ReportItem } from './state'
 import { useAiProctor, useIntegrity, type Integrity } from './hooks/useIntegrity'
 import { BinaryTree, Brand, fmtClock, fmtTime, Pill, ReceiptModal, useNow } from './ui'
@@ -166,6 +166,19 @@ function Instructions({ api, integrity }: { api: ExamApi; integrity: Integrity }
   const [lang, setLang] = useState<Lang>(api.mine!.lang)
   const entry = rosterEntry(api.me ?? undefined)
   const centre = Boolean(api.state.control.centreMode)
+  // Stage the encrypted paper while the candidate reads the rules; only the key comes at exam time.
+  const [staged, setStaged] = useState<string | null>(null)
+  const { recordSignal } = api
+  useEffect(() => {
+    if (!entry) return
+    let alive = true
+    void preloadPaper(entry.id).then((result) => {
+      if (!alive || !result) return
+      setStaged(result.at)
+      if (result.fresh) recordSignal('Encrypted paper pre-loaded on this PC', 'The AES-256-GCM encrypted paper is stored on this PC. It cannot be read until the exam server releases the key in the exam window.', 'release', { action: 'paper-staged' })
+    })
+    return () => { alive = false }
+  }, [entry, recordSignal])
   const cameraOk = centre || integrity.faces === 1 || integrity.mediaStatus === 'denied' || integrity.mediaStatus === 'unavailable'
   return (
     <main className="doc-page">
@@ -198,6 +211,7 @@ function Instructions({ api, integrity }: { api: ExamApi; integrity: Integrity }
         </label>
         <label className="declaration"><input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} /> I have read the instructions, I will not use unfair means, and I consent to camera/microphone monitoring and AI-assisted frame review for this exam.</label>
         <CameraCheck integrity={integrity} />
+        <p className="muted small"><LockKeyhole size={13} /> {staged ? `Encrypted question paper ready on this PC since ${fmtTime(staged)} — it opens only when the exam starts.` : 'Preparing the encrypted question paper on this PC…'}</p>
         <button className="btn primary" disabled={!agreed || !cameraOk} onClick={() => api.acceptInstructions(lang)}>
           {!agreed ? 'Accept the declaration to continue' : centre ? 'I am ready — run system check' : integrity.mediaStatus !== 'ready' && integrity.mediaStatus !== 'denied' && integrity.mediaStatus !== 'unavailable' ? 'Allow camera & microphone to continue' : integrity.faces === 1 || integrity.mediaStatus !== 'ready' ? 'I am ready — run system check' : 'Waiting for your face to be detected'} <ChevronRight size={16} />
         </button>
@@ -245,7 +259,7 @@ async function runPlatformChecks(state: ExamState, candidateId: string, lang: La
   }
 
   return { tampered: !paper.ok && paper.tampered ? paper.reason : undefined, checks: [
-    { label: 'Signed paper', detail: paper.ok ? `${paper.code} · v${paper.version} · ${paper.count} items · authority signature valid · every question matches its signed hash · fingerprint #${paper.root.slice(0, 12)}${paper.cached ? ' (verified offline copy)' : ''}` : `${paper.reason} Entry blocked.`, ok: manifestOk },
+    { label: 'Signed paper', detail: paper.ok ? `${paper.code} · v${paper.version} · ${paper.count} items · ${paper.stagedAt ? `pre-loaded ${fmtTime(paper.stagedAt)} · ` : paper.replaced ? 'pre-loaded copy failed checks and was re-downloaded · ' : ''}${paper.keyReleasedAt ? `key released ${fmtTime(paper.keyReleasedAt)} · ` : ''}authority signature valid · every question matches its signed hash · fingerprint #${paper.root.slice(0, 12)}${paper.cached ? ' (verified offline copy)' : ''}` : `${paper.reason} Entry blocked.`, ok: manifestOk },
     { label: 'Language pack', detail: langOk ? `${lang === 'hi' ? 'Hindi' : 'English'} available for all ${QUESTIONS.length} items` : paper.ok ? 'Selected language is missing for some items.' : 'Waiting for a verified paper.', ok: langOk },
     { label: 'Exam timer', detail: drift < 60 ? `${fmtClock(EXAM_SECONDS)} configured · clock drift ${Math.round(drift)} ms` : `Timer drift ${Math.round(drift)} ms is too high`, ok: drift < 60 },
     save,

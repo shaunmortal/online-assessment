@@ -18,7 +18,7 @@ export const serverKey = () => (publicKey ??= fetch('/api/public-key')
 const bytes = (base64: string) => Uint8Array.from(atob(base64), (char) => char.charCodeAt(0))
 
 export type PaperResult =
-  | { ok: true; root: string; count: number; code: string; version: string; cached: boolean }
+  | { ok: true; root: string; count: number; code: string; version: string; cached: boolean; stagedAt?: string; keyReleasedAt?: string; replaced?: boolean }
   | { ok: false; reason: string; tampered?: string[]; locked?: boolean }
 
 interface Manifest { paper: { code: string; version: string }; items: Array<{ id: string; hash: string }>; root: string; keyId: string }
@@ -63,14 +63,37 @@ function install(questions: Question[], result: Extract<PaperResult, { ok: true 
   paperInfo = { root: result.root, version: result.version, code: result.code, keyId }
 }
 
+interface Download { manifest: string; signature: string; keyId: string; iv: string; ciphertext: string }
+interface Preloaded { at: string; download: Download }
+const preloadKey = (candidateId: string) => `examshield:prepaper:${candidateId}`
+const fetchPaper = async (candidateId: string): Promise<Download> => {
+  const response = await fetch(`/api/paper?id=${encodeURIComponent(candidateId)}`, { cache: 'no-store' })
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  return response.json()
+}
+const readPreloaded = (candidateId: string): Preloaded | null => {
+  try { return JSON.parse(window.localStorage.getItem(preloadKey(candidateId)) ?? 'null') } catch { return null }
+}
+const storePreloaded = (candidateId: string, download: Download) => {
+  const at = new Date().toISOString()
+  try { window.localStorage.setItem(preloadKey(candidateId), JSON.stringify({ at, download } satisfies Preloaded)) } catch { /* storage full: download at the gate instead */ }
+  return at
+}
+
+// As at a real centre: the ENCRYPTED paper is staged on the PC ahead of time (useless without the key);
+// only the small key travels when the exam opens. Returns when the copy was staged, or null if offline.
+export async function preloadPaper(candidateId: string): Promise<{ at: string; fresh: boolean } | null> {
+  const existing = readPreloaded(candidateId)
+  if (existing) return { at: existing.at, fresh: false }
+  try { return { at: storePreloaded(candidateId, await fetchPaper(candidateId)), fresh: true } } catch { return null }
+}
+
 export async function loadPaper(candidateId: string, dob: string, sessionId: string): Promise<PaperResult> {
   const cacheKey = `examshield:paper:${sessionId}:${candidateId}`
   const seed = `${sessionId}:${candidateId}`
-  let download: { manifest: string; signature: string; keyId: string; iv: string; ciphertext: string }
-  let key: { key?: string; error?: string }
+  let key: { key?: string; error?: string; releasedAt?: string }
   let status = 0
   try {
-    download = await (await fetch(`/api/paper?id=${encodeURIComponent(candidateId)}`, { cache: 'no-store' })).json()
     const response = await fetch('/api/paper-key', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: candidateId, dob }) })
     status = response.status
     key = await response.json()
@@ -78,7 +101,7 @@ export async function loadPaper(candidateId: string, dob: string, sessionId: str
     // Offline: a paper already verified on this PC for this session is re-verified and reused.
     try {
       const cached = JSON.parse(window.localStorage.getItem(cacheKey) ?? 'null') as Cached | null
-      if (!cached) return { ok: false, reason: 'Cannot reach the exam server to download the paper.' }
+      if (!cached) return { ok: false, reason: readPreloaded(candidateId) ? 'Encrypted paper is on this PC; waiting for the exam server to release the key.' : 'Cannot reach the exam server to download the paper.' }
       const result = await verify(cached.manifest, cached.signature, cached.keyId, cached.questions)
       if (result.ok) install(cached.questions, result, cached.keyId, seed)
       return result.ok ? { ...result, cached: true } : result
@@ -87,17 +110,32 @@ export async function loadPaper(candidateId: string, dob: string, sessionId: str
     }
   }
   if (!key.key) return { ok: false, reason: key.error ?? `Paper key refused (HTTP ${status}).`, locked: status === 423 }
-  let questions: Question[]
-  try {
-    const aes = await crypto.subtle.importKey('raw', bytes(key.key), 'AES-GCM', false, ['decrypt'])
-    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes(download.iv) }, aes, bytes(download.ciphertext))
-    questions = JSON.parse(new TextDecoder().decode(plain))
-  } catch {
-    return { ok: false, reason: 'Paper could not be decrypted (wrong key or corrupted download).', tampered: ['ciphertext'] }
+  const aes = await crypto.subtle.importKey('raw', bytes(key.key), 'AES-GCM', false, ['decrypt'])
+  const open = async (download: Download): Promise<{ result: PaperResult; questions?: Question[] }> => {
+    let questions: Question[]
+    try {
+      const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bytes(download.iv) }, aes, bytes(download.ciphertext))
+      questions = JSON.parse(new TextDecoder().decode(plain))
+    } catch {
+      return { result: { ok: false, reason: 'Paper could not be decrypted (wrong key or corrupted download).', tampered: ['ciphertext'] } }
+    }
+    return { result: await verify(download.manifest, download.signature, download.keyId, questions), questions }
   }
-  const result = await verify(download.manifest, download.signature, download.keyId, questions)
-  if (!result.ok) return result
+  // Use the staged copy; if it fails (server restarted with a new key, or the copy was altered), discard
+  // it and download once more. A fresh copy that also fails is refused.
+  const staged = readPreloaded(candidateId)
+  let download = staged?.download
+  let opened = download ? await open(download) : undefined
+  let replaced = false
+  if (!opened?.result.ok) {
+    try { download = await fetchPaper(candidateId) } catch { return opened?.result ?? { ok: false, reason: 'Cannot reach the exam server to download the paper.' } }
+    replaced = Boolean(staged)
+    storePreloaded(candidateId, download)
+    opened = await open(download)
+  }
+  const { result, questions } = opened
+  if (!result.ok || !questions || !download) return result
   install(questions, result, download.keyId, seed)
   try { window.localStorage.setItem(cacheKey, JSON.stringify({ manifest: download.manifest, signature: download.signature, keyId: download.keyId, questions } satisfies Cached)) } catch { /* storage full: online-only */ }
-  return result
+  return { ...result, stagedAt: replaced ? undefined : staged?.at, keyReleasedAt: key.releasedAt, replaced }
 }
