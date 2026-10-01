@@ -20,8 +20,8 @@
 # ExamShield
 
 A browser exam platform built around one idea: when an exam session is
-disrupted, prove what happened, pause the candidate's clock, keep every
-answer, and give a fair, officer-approved, verifiable remedy.
+disrupted, keep the candidate answering offline, keep every answer, prove
+what happened, and give a fair, officer-approved, verifiable remedy.
 
 ## Run
 
@@ -126,12 +126,13 @@ flowchart LR
 7.  **Submit** creates a response digest and any applicable Fairness
     Receipt.
 
-## Disruptions: detect → pause → preserve → remedy → receipt
+## Disruptions: detect → keep working offline → preserve → remedy → receipt
 
 -   **Detection:** the candidate browser sends a heartbeat every 2
     seconds; the Control Tower watchdog detects silent sessions.
--   **Pause:** when the connection is lost, the candidate timer freezes
-    and resumes from the same value.
+-   **Offline-first:** when the connection is lost, the exam timer keeps
+    running and a second "Offline" timer appears beside it; the candidate
+    keeps answering and moving between questions.
 -   **Preserve:** answers remain safe in IndexedDB and queued saves
     reconcile after recovery.
 -   **Correlation:** multiple PCs losing heartbeat in the same service
