@@ -3,6 +3,53 @@ import QRCode from 'qrcode'
 import { CheckCircle2, Download, ShieldCheck, ShieldX, X } from 'lucide-react'
 import { verifyReceipt, type ExamState, type Receipt, type ReceiptCheck } from './lib/core'
 
+// ---- officer passcode (only enforced when the server has OFFICER_PASSCODE set)
+const OFFICER_KEY = 'examshield:officer'
+export const officerPasscode = () => window.sessionStorage.getItem(OFFICER_KEY) ?? undefined
+export const officerHeaders = (): Record<string, string> => (officerPasscode() ? { 'x-officer-passcode': officerPasscode()! } : {})
+
+export function OfficerGate({ children }: { children: ReactNode }) {
+  const [status, setStatus] = useState<'checking' | 'open' | 'locked'>('checking')
+  const [code, setCode] = useState('')
+  const [error, setError] = useState('')
+  useEffect(() => {
+    void (async () => {
+      try {
+        const { officerRequired } = await (await fetch('/api/auth-status')).json()
+        if (!officerRequired) return setStatus('open')
+        const saved = officerPasscode()
+        const ok = saved && (await fetch('/api/officer-check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ passcode: saved }) })).ok
+        setStatus(ok ? 'open' : 'locked')
+      } catch {
+        setStatus('open') // server unreachable: show the cached view; the relay still enforces access
+      }
+    })()
+  }, [])
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    const ok = (await fetch('/api/officer-check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ passcode: code }) })).ok
+    if (!ok) return setError('Wrong passcode.')
+    window.sessionStorage.setItem(OFFICER_KEY, code)
+    window.location.reload() // reconnect the relay as an officer
+  }
+  if (status === 'checking') return null
+  if (status === 'open') return <>{children}</>
+  return (
+    <main className="verify-page">
+      <header className="bar"><Brand inverse /><span>Exam officers only</span></header>
+      <section className="card">
+        <h1>Control Tower sign-in</h1>
+        <p className="muted">Enter the officer passcode for this exam session.</p>
+        <form onSubmit={(event) => void submit(event)} className="row wrap">
+          <input type="password" autoFocus value={code} onChange={(e) => setCode(e.target.value)} placeholder="Officer passcode" aria-label="Officer passcode" />
+          <button className="btn primary" type="submit">Open Control Tower</button>
+        </form>
+        {error && <p className="error-text">{error}</p>}
+      </section>
+    </main>
+  )
+}
+
 export function Brand({ inverse = false }: { inverse?: boolean }) {
   return (
     <span className={`brand ${inverse ? 'inverse' : ''}`}>

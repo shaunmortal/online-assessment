@@ -36,6 +36,18 @@ let recentCalls: number[] = []
 let lastError: string | undefined
 export const proctorStats = { calls: 0, errors: 0, totalMs: 0, lastError: undefined as string | undefined }
 
+// Hard daily cap on Claude calls (proctor + co-pilot + risk report), so a public URL cannot run up the bill.
+const budget = { limit: Number(process.env.AI_DAILY_LIMIT) || 1500, used: 0, day: new Date().toDateString() }
+export const setAiDailyLimit = (limit: number) => { if (limit > 0) budget.limit = limit }
+export const aiBudget = () => ({ limit: budget.limit, used: budget.used })
+export function takeAiBudget() {
+  const today = new Date().toDateString()
+  if (budget.day !== today) { budget.day = today; budget.used = 0 }
+  if (budget.used >= budget.limit) return false
+  budget.used += 1
+  return true
+}
+
 class TooLarge extends Error {}
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -86,6 +98,7 @@ export function createProctorHandler(apiKey: string | undefined, intervalSeconds
     if (Date.now() - previous < MIN_GAP_MS) return send(res, 429, { error: 'Too many frames; slow down.' })
     recentCalls = recentCalls.filter((time) => Date.now() - time < 60_000)
     if (recentCalls.length >= GLOBAL_PER_MINUTE) return send(res, 429, { error: 'AI proctor capacity reached; frame skipped.' })
+    if (!takeAiBudget()) return send(res, 429, { error: 'Daily AI budget reached; frame review paused until tomorrow.' })
     lastCall.set(candidateId, Date.now())
     recentCalls.push(Date.now())
 

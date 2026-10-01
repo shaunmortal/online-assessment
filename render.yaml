@@ -1,0 +1,20 @@
+# Render Blueprint: one always-listening Node web service (WebSocket relay + APIs + built app).
+services:
+  - type: web
+    name: examshield
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/heartbeat
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: OFFICER_PASSCODE
+        sync: false
+      - key: AI_DAILY_LIMIT
+        value: "600"
+      - key: PROCTOR_INTERVAL_SECONDS
+        value: "20"

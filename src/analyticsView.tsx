@@ -4,7 +4,7 @@ import { verifyChain, type ChainReport, type ExamState, type Incident } from './
 import { deviceRisk, examDecision, pathHealth, patternFlags, reconcile, systemicStats } from './lib/analytics'
 import { QUESTIONS, ROSTER, rosterEntry } from './data/paper'
 import { analyseIncident, sessionReport, type ExamApi } from './state'
-import { Brand, fmtClock, fmtTime, Pill, policyLabel, useNow } from './ui'
+import { Brand, fmtClock, fmtTime, officerHeaders, Pill, policyLabel, useNow } from './ui'
 
 // ---------------------------------------------------------------- infrastructure
 
@@ -25,7 +25,7 @@ export function InfraPanel({ api }: { api: ExamApi }) {
     let alive = true
     const poll = async () => {
       try {
-        const response = await fetch('/api/health', { cache: 'no-store' })
+        const response = await fetch('/api/health', { cache: 'no-store', headers: officerHeaders() })
         const body = (await response.json()) as Health
         if (!alive) return
         setHealth(body)
@@ -43,7 +43,7 @@ export function InfraPanel({ api }: { api: ExamApi }) {
   const restore = async (file?: File) => {
     if (!file) return
     try {
-      const response = await fetch('/api/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: await file.text() })
+      const response = await fetch('/api/restore', { method: 'POST', headers: { 'Content-Type': 'application/json', ...officerHeaders() }, body: await file.text() })
       const body = await response.json()
       setRestoreMsg(response.ok ? `Restored session ${body.sessionId}: ${body.candidates} candidates, ${body.events} events. All PCs resync automatically.` : body.error)
     } catch {
@@ -76,7 +76,7 @@ export function InfraPanel({ api }: { api: ExamApi }) {
         </div>
       )}
       <div className="row wrap">
-        <a className="btn small" href="/api/backup" download><Download size={13} /> Download full backup</a>
+        <button className="btn small" onClick={() => void fetch('/api/backup', { headers: officerHeaders() }).then((r) => r.blob()).then((blob) => { const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'examshield-backup.json'; a.click(); URL.revokeObjectURL(url) })}><Download size={13} /> Download full backup</button>
         <label className="btn small file-btn"><Upload size={13} /> Restore from backup<input type="file" accept="application/json" onChange={(e) => void restore(e.target.files?.[0])} /></label>
         <a className="btn small" href="/report" target="_blank" rel="noreferrer"><FileText size={13} /> Exam report (print / PDF)</a>
         {restoreMsg && <small>{restoreMsg}</small>}
@@ -151,7 +151,7 @@ export function CopilotBox({ state, incident }: { state: ExamState; incident: In
     setBusy(true)
     setError('')
     try {
-      const response = await fetch('/api/copilot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ context: incidentContext(state, incident) }) })
+      const response = await fetch('/api/copilot', { method: 'POST', headers: { 'Content-Type': 'application/json', ...officerHeaders() }, body: JSON.stringify({ context: incidentContext(state, incident) }) })
       const body = await response.json()
       if (!response.ok) throw new Error(body.error)
       setAdvice(body)
@@ -240,7 +240,7 @@ export function AnalyticsPanel({ api }: { api: ExamApi }) {
     setBusy(true)
     setError('')
     try {
-      const response = await fetch('/api/risk-report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ context: riskContext(state, nowMs) }) })
+      const response = await fetch('/api/risk-report', { method: 'POST', headers: { 'Content-Type': 'application/json', ...officerHeaders() }, body: JSON.stringify({ context: riskContext(state, nowMs) }) })
       const body = await response.json()
       if (!response.ok) throw new Error(body.error)
       api.saveRiskReport({ at: body.at, model: body.model, result: body.result })

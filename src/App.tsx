@@ -2,7 +2,7 @@ import { lazy, Suspense } from 'react'
 import { useExam } from './state'
 import { CandidateApp } from './candidate'
 import { OpsApp } from './ops'
-import { VerifyPage } from './ui'
+import { OfficerGate, VerifyPage } from './ui'
 import { ReportPage } from './analyticsView'
 
 // The marketing page pulls in Three.js, so it loads only on "/".
@@ -23,5 +23,6 @@ function ExamRoutes() {
 export default function App() {
   const path = window.location.pathname
   if (path === '/' || path === '/index.html') return <Suspense fallback={<div style={{ minHeight: '100vh', background: '#0e1726' }} />}><Landing /></Suspense>
+  if (path.startsWith('/ops') || path.startsWith('/report')) return <OfficerGate><ExamRoutes /></OfficerGate>
   return <ExamRoutes />
 }

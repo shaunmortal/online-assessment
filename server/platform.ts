@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 import { WebSocket, WebSocketServer } from 'ws'
 import { StateStore, isExamState, isPatch, patchOf, verifyReceipt, type ExamState, type Receipt, type StatePatch } from '../src/lib/core'
-import { createProctorHandler, proctorStats } from './proctor'
+import { aiBudget, createProctorHandler, proctorStats, setAiDailyLimit, takeAiBudget } from './proctor'
 import { rosterEntry } from '../src/data/paper'
 
 // The exam server: sync relay with durable on-disk storage, health metrics, receipt signing,
@@ -90,7 +90,14 @@ per centre/service path heartbeat losses, offline minutes, incidents, remedies, 
 Identify likely systemic root causes, rank risks, and give concrete prevention steps for the next exam.
 Ground every statement in the numbers given; say "insufficient data" rather than guessing.`
 
-export function attachPlatform(httpServer: Server | null | undefined, use: (handler: (req: IncomingMessage, res: ServerResponse, next: () => void) => void) => void, apiKey: string | undefined, intervalSeconds: number) {
+export interface PlatformOptions { apiKey?: string; intervalSeconds: number; officerPasscode?: string; aiDailyLimit?: number }
+
+export function attachPlatform(httpServer: Server | null | undefined, use: (handler: (req: IncomingMessage, res: ServerResponse, next: () => void) => void) => void, options: PlatformOptions) {
+  const { apiKey, intervalSeconds, officerPasscode } = options
+  if (options.aiDailyLimit) setAiDailyLimit(options.aiDailyLimit)
+  // With OFFICER_PASSCODE set (public deployments), only authenticated officers may change control state,
+  // reset sessions, see other candidates' data, or call the paid AI endpoints.
+  const officerOk = (req: IncomingMessage) => !officerPasscode || req.headers['x-officer-passcode'] === officerPasscode
   const startedAt = Date.now()
   const key = loadKey()
   const client = apiKey ? new Anthropic({ apiKey, maxRetries: 1, timeout: 60_000 }) : undefined
@@ -152,11 +159,12 @@ export function attachPlatform(httpServer: Server | null | undefined, use: (hand
   const relay = new WebSocketServer({ noServer: true, perMessageDeflate: false })
   // Routing: a candidate PC only needs control updates and its own data; the Control Tower and
   // viewers get everything. Candidate traffic therefore fans out to a handful of officers, not to N PCs.
-  const meta = new WeakMap<WebSocket, { role: string; me?: string }>()
+  const meta = new WeakMap<WebSocket, { role: string; me?: string; officer: boolean }>()
+  const privileged = (info?: { role: string; officer: boolean }) => Boolean(info && info.role !== 'candidate' && info.officer)
   const forClient = (patch: StatePatch, ws: WebSocket): StatePatch | null => {
     const info = meta.get(ws)
-    if (!info || info.role !== 'candidate') return patch
-    const me = info.me
+    if (privileged(info)) return patch
+    const me = info?.me
     const out: StatePatch = { sessionId: patch.sessionId, createdAt: patch.createdAt, epoch: patch.epoch, full: patch.full }
     let useful = Boolean(patch.full)
     if (patch.control) { out.control = patch.control; useful = true }
@@ -177,14 +185,14 @@ export function attachPlatform(httpServer: Server | null | undefined, use: (hand
   // Index sockets by role so a candidate's update costs O(officers + that candidate's devices), not O(all PCs).
   const officers = new Set<WebSocket>()
   const byCandidate = new Map<string, Set<WebSocket>>()
-  const register = (ws: WebSocket, role: string, me?: string) => {
+  const register = (ws: WebSocket, role: string, me?: string, officer = !officerPasscode) => {
     const old = meta.get(ws)
     if (old?.me) byCandidate.get(old.me)?.delete(ws)
     officers.delete(ws)
-    meta.set(ws, { role, me })
+    meta.set(ws, { role, me, officer })
     if (role === 'candidate') {
       if (me) byCandidate.set(me, (byCandidate.get(me) ?? new Set()).add(ws))
-    } else officers.add(ws)
+    } else if (officer) officers.add(ws)
   }
   const unregister = (ws: WebSocket) => {
     const info = meta.get(ws)
@@ -215,14 +223,26 @@ export function attachPlatform(httpServer: Server | null | undefined, use: (hand
         try {
           const text = payload.toString()
           bytesIn += text.length
-          const envelope = JSON.parse(text) as { source?: string; role?: string; me?: string; patch?: unknown; state?: unknown }
+          const envelope = JSON.parse(text) as { source?: string; role?: string; me?: string; passcode?: string; patch?: unknown; state?: unknown }
           const previousMe = meta.get(ws)?.me
-          if (envelope.role && (envelope.role !== meta.get(ws)?.role || envelope.me !== previousMe)) register(ws, envelope.role, envelope.me)
+          const officer = !officerPasscode || envelope.passcode === officerPasscode || Boolean(meta.get(ws)?.officer && envelope.passcode === undefined)
+          if (envelope.role && (envelope.role !== meta.get(ws)?.role || envelope.me !== previousMe || officer !== meta.get(ws)?.officer)) register(ws, envelope.role, envelope.me, officer)
           // First message (or a newly signed-in candidate): send the current snapshot, filtered for this client.
           if (store.state && (!greeted || envelope.me !== previousMe)) sendTo(ws, patchOf(store.state), 'relay')
           greeted = true
-          const patch = isPatch(envelope.patch) ? envelope.patch : isExamState(envelope.state) ? patchOf(envelope.state) : undefined
+          let patch = isPatch(envelope.patch) ? envelope.patch : isExamState(envelope.state) ? patchOf(envelope.state) : undefined
           if (!patch) return
+          const info = meta.get(ws)
+          if (!privileged(info)) {
+            // Candidates and unauthenticated pages may only write their own attempt and its evidence.
+            const me = info?.me
+            patch = {
+              sessionId: patch.sessionId, createdAt: patch.createdAt, epoch: patch.epoch,
+              candidates: me && patch.candidates?.[me] ? { [me]: patch.candidates[me] } : undefined,
+              audit: patch.audit?.filter((event) => !event.candidateId || event.candidateId === me),
+              checkpoints: patch.checkpoints?.filter((checkpoint) => checkpoint.candidateId === me),
+            }
+          }
           const before = store.state?.sessionId
           if (!store.apply(patch)) return
           messages.push(Date.now())
@@ -259,7 +279,9 @@ export function attachPlatform(httpServer: Server | null | undefined, use: (hand
       if (path === '/api/health' && req.method === 'GET') {
         messages = messages.filter((time) => Date.now() - time < 60_000)
         const memory = process.memoryUsage()
+        if (!officerOk(req)) return send(res, 200, { uptimeSeconds: Math.round((Date.now() - startedAt) / 1000), officerRequired: true })
         return send(res, 200, {
+          aiBudget: aiBudget(),
           uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
           eventLoopLagMs: loopLagMs,
           memoryMb: Math.round(memory.rss / 1048576),
@@ -271,6 +293,12 @@ export function attachPlatform(httpServer: Server | null | undefined, use: (hand
           proctor: { enabled: Boolean(client), ...proctorStats },
         })
       }
+      if (path === '/api/auth-status' && req.method === 'GET') return send(res, 200, { officerRequired: Boolean(officerPasscode) })
+      if (path === '/api/officer-check' && req.method === 'POST') {
+        const { passcode } = (await readJson(req)) as { passcode?: string }
+        return send(res, !officerPasscode || passcode === officerPasscode ? 200 : 403, { ok: !officerPasscode || passcode === officerPasscode })
+      }
+      if (['/api/backup', '/api/restore', '/api/copilot', '/api/risk-report'].includes(path) && !officerOk(req)) return send(res, 401, { error: 'Officer passcode required.' })
       if (path === '/api/public-key' && req.method === 'GET') return send(res, 200, { keyId: key.keyId, jwk: key.publicJwk, alg: 'ECDSA P-256 / SHA-256' })
 
       // The server signs a receipt only after re-verifying it against its OWN copy of the evidence.
@@ -335,6 +363,7 @@ export function attachPlatform(httpServer: Server | null | undefined, use: (hand
 
       if ((path === '/api/copilot' || path === '/api/risk-report') && req.method === 'POST') {
         if (!client) return send(res, 503, { error: 'AI is off: set ANTHROPIC_API_KEY in .env and restart.' })
+        if (!takeAiBudget()) return send(res, 429, { error: 'Daily AI budget reached.' })
         const { context } = (await readJson(req)) as { context?: unknown }
         if (!context) return send(res, 400, { error: 'Expected { context }' })
         const started = Date.now()

@@ -329,7 +329,8 @@ export function useExam() {
 
   const role = window.location.pathname.startsWith('/exam') ? 'candidate' : window.location.pathname.startsWith('/ops') ? 'ops' : 'viewer'
   const sendRelay = (envelope: Record<string, unknown>) => {
-    if (relayRef.current?.readyState === WebSocket.OPEN) relayRef.current.send(JSON.stringify({ source: clientId, role, me: meRef.current ?? undefined, ...envelope }))
+    const passcode = role === 'candidate' ? undefined : window.sessionStorage.getItem('examshield:officer') ?? undefined
+    if (relayRef.current?.readyState === WebSocket.OPEN) relayRef.current.send(JSON.stringify({ source: clientId, role, me: meRef.current ?? undefined, passcode, ...envelope }))
   }
 
   const write = useCallback((next: ExamState) => {

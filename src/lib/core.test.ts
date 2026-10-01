@@ -44,7 +44,7 @@ assert.equal((await verifyReceipt({ ...receipt, creditSeconds: 999 }, state.sess
 
 // Merge: slices by owner, tampered (higher rev) copy wins, new session replaces old.
 const a = { ...state, audit: events }
-const b = { ...state, audit: [{ ...events[1], detail: 'edited', rev: 1 }], control: { ...state.control, updatedAt: at(99), assistedApproved: { 'EXM-1': at(99) } } }
+const b = { ...state, audit: [{ ...events[1], detail: 'edited', rev: 1 }], control: { ...state.control, updatedAt: at(99), rev: (state.control.rev ?? 0) + 1, assistedApproved: { 'EXM-1': at(99) } } }
 const merged = mergeState(a, b)
 assert.equal(merged.audit.length, 3)
 assert.equal(merged.audit[1].detail, 'edited')
