@@ -170,12 +170,14 @@ export function useIntegrity(onSignal: Signal) {
     let streak = 0
     let stable: number | null = null
     void import('@mediapipe/tasks-vision').then(async ({ FaceDetector, FilesetResolver }) => {
-      const files = await FilesetResolver.forVisionTasks('/mediapipe')
-      const created = await FaceDetector.createFromOptions(files, {
+      // The 11 MB wasm comes from jsDelivr first (fast everywhere); our own copy is the fallback for
+      // centres that block CDNs. Keep the version equal to the pinned package in package.json.
+      const create = async (base: string) => FaceDetector.createFromOptions(await FilesetResolver.forVisionTasks(base), {
         baseOptions: { modelAssetPath: '/models/blaze_face_short_range.tflite' },
         runningMode: 'VIDEO',
         minDetectionConfidence: 0.45,
       })
+      const created = await create('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm').catch(() => create('/mediapipe'))
       if (!alive) return created.close()
       detector = created
       const sample = () => {
