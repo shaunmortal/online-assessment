@@ -90,6 +90,7 @@ export function OpsApp({ api }: { api: ExamApi }) {
                 {[...new Set([2, 5, 10, 20, 45, 60, 90, state.control.windowMinutes ?? 60])].sort((a, b) => a - b).map((m) => <option key={m} value={m}>{m} min window</option>)}
               </select>
             </span>
+            <ResetButton onReset={api.reset} />
             {chain && <Pill tone={chain.ok ? 'good' : 'bad'}>{chain.ok ? <ShieldCheck size={13} /> : <ShieldX size={13} />} Evidence chain {chain.ok ? 'intact' : 'BROKEN'}</Pill>}
             <Pill tone={open.length ? 'bad' : 'good'}>{open.length ? `${open.length} incident(s) need attention` : 'No open incidents'}</Pill>
           </div>
@@ -232,7 +233,6 @@ export function OpsApp({ api }: { api: ExamApi }) {
               <label className="field-inline">Reschedule threshold
                 <select value={state.control.thresholdSeconds} onChange={(e) => api.setPolicy({ thresholdSeconds: Number(e.target.value) })}>{[60, 120, 180, 300, 600].map((v) => <option key={v} value={v}>{v / 60} min</option>)}</select>
               </label>
-              <ResetButton onReset={api.reset} />
             </div>
           </div>
         </section>
