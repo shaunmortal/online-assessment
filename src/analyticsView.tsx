@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Activity, Bot, Database, Download, FileText, Gauge, HardDrive, Loader2, Megaphone, Printer, ShieldCheck, Upload, Zap } from 'lucide-react'
 import { verifyChain, type ChainReport, type ExamState, type Incident } from './lib/core'
-import { deviceRisk, examDecision, pathHealth, patternFlags, reconcile, systemicStats } from './lib/analytics'
-import { QUESTIONS, ROSTER, rosterEntry } from './data/paper'
+import { deviceRisk, examDecision, pathHealth, patternFlags, reconcile, systemicStats, type AnswerKey } from './lib/analytics'
+import { BLUEPRINT, ROSTER, rosterEntry } from './data/paper'
 import { analyseIncident, sessionReport, type ExamApi } from './state'
 import { Brand, fmtClock, fmtTime, officerHeaders, Pill, policyLabel, useNow } from './ui'
 
@@ -210,7 +210,18 @@ interface RiskReportResult {
   recommendations: Array<{ action: string; priority: string; expected_effect: string }>
 }
 
-export function riskContext(state: ExamState, nowMs = Date.now()) {
+// Officers only: the server releases the answer key with the officer passcode.
+let answerKeyCache: Promise<AnswerKey> | undefined
+export function useAnswerKey() {
+  const [keys, setKeys] = useState<AnswerKey>({})
+  useEffect(() => {
+    answerKeyCache ??= fetch('/api/answer-key', { headers: officerHeaders() }).then((r) => (r.ok ? r.json() : { keys: {} })).then((body) => body.keys ?? {}).catch(() => { answerKeyCache = undefined; return {} })
+    void answerKeyCache.then(setKeys)
+  }, [])
+  return keys
+}
+
+export function riskContext(state: ExamState, answerKey: AnswerKey, nowMs = Date.now()) {
   const stats = systemicStats(state, nowMs)
   return {
     exam: { candidatesSignedIn: Object.keys(state.candidates).length, started: Object.values(state.candidates).filter((s) => s.startedAt).length, sessionMinutes: Math.round((nowMs - Date.parse(state.createdAt)) / 60000) },
@@ -220,7 +231,7 @@ export function riskContext(state: ExamState, nowMs = Date.now()) {
     paths: pathHealth(state, nowMs).map(({ path, centre, meanRtt, baselineRtt, forecast, reasons }) => ({ path, centre, meanRtt, baselineRtt, forecast, reasons })),
     devices: Object.values(state.candidates).filter((s) => s.telemetry).map((s) => ({ centre: rosterEntry(s.candidateId)?.centre, path: rosterEntry(s.candidateId)?.path, battery: s.telemetry!.battery ?? null, network: s.telemetry!.net ?? null, rttMs: s.telemetry!.rttMs, missed: s.telemetry!.missed, drops: s.outages.length })),
     incidents: state.control.incidents.map((incident) => ({ id: incident.id, kind: incident.kind, platformWide: Boolean(incident.platform), affected: incident.affected.length, centres: [...new Set(incident.affected.map((id) => rosterEntry(id)?.centre))], seconds: incident.restoredAt ? Math.round((Date.parse(incident.restoredAt) - Date.parse(incident.startedAt)) / 1000) : 'ongoing', remedy: incident.decision?.policy ?? 'pending' })),
-    patternFlags: patternFlags(state).map((flag) => ({ kind: flag.kind, count: flag.candidates.length })),
+    patternFlags: patternFlags(state, answerKey).map((flag) => ({ kind: flag.kind, count: flag.candidates.length })),
     examDecision: examDecision(state, nowMs),
   }
 }
@@ -230,7 +241,8 @@ export function AnalyticsPanel({ api }: { api: ExamApi }) {
   const nowMs = useNow(5000)
   const stats = systemicStats(state, nowMs)
   const decision = examDecision(state, nowMs)
-  const flags = patternFlags(state)
+  const answerKey = useAnswerKey()
+  const flags = patternFlags(state, answerKey)
   const report = state.control.riskReport
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -240,7 +252,7 @@ export function AnalyticsPanel({ api }: { api: ExamApi }) {
     setBusy(true)
     setError('')
     try {
-      const response = await fetch('/api/risk-report', { method: 'POST', headers: { 'Content-Type': 'application/json', ...officerHeaders() }, body: JSON.stringify({ context: riskContext(state, nowMs) }) })
+      const response = await fetch('/api/risk-report', { method: 'POST', headers: { 'Content-Type': 'application/json', ...officerHeaders() }, body: JSON.stringify({ context: riskContext(state, answerKey, nowMs) }) })
       const body = await response.json()
       if (!response.ok) throw new Error(body.error)
       api.saveRiskReport({ at: body.at, model: body.model, result: body.result })
@@ -274,7 +286,7 @@ export function AnalyticsPanel({ api }: { api: ExamApi }) {
       {Object.keys(stats.causes).length > 0 && <p className="small">Heartbeat-loss causes: {Object.entries(stats.causes).map(([cause, count]) => `${cause} ×${count}`).join(' · ')}</p>}
 
       <h3>Suspicious patterns across candidates</h3>
-      {flags.length ? <ul className="evidence">{flags.map((flag) => <li key={flag.kind + flag.candidates.join()}><Pill tone="warn">{flag.kind}</Pill> {flag.candidates.join(' & ')} — {flag.detail} <small>(review-only)</small></li>)}</ul> : <p className="muted small">No collusion, identical-code or rapid-answer patterns found.</p>}
+      {flags.length ? <ul className="evidence">{flags.map((flag) => <li key={flag.kind + flag.candidates.join()}><Pill tone={flag.adjacent ? 'bad' : 'warn'}>{flag.kind}{flag.adjacent ? ' · adjacent seats' : ''}</Pill> {flag.candidates.join(' & ')} — {flag.detail} <small>(review-only)</small></li>)}</ul> : <p className="muted small">No collusion, timing-sync, identical-code or rapid-answer patterns found.</p>}
 
       <h3>Response reconciliation</h3>
       <div className="table-wrap">
@@ -324,7 +336,8 @@ export function ReportPage({ state }: { state: ExamState }) {
   const slices = Object.values(state.candidates)
   const decision = examDecision(state, nowMs)
   const stats = systemicStats(state, nowMs)
-  const flags = patternFlags(state)
+  const answerKey = useAnswerKey()
+  const flags = patternFlags(state, answerKey)
   const report = state.control.riskReport
   return (
     <main className="report-page">
@@ -353,7 +366,7 @@ export function ReportPage({ state }: { state: ExamState }) {
               <tr key={slice.candidateId}>
                 <td>{rosterEntry(slice.candidateId)?.name}<small>{slice.candidateId} · {rosterEntry(slice.candidateId)?.centre}</small></td>
                 <td>{slice.submitReason === 'cancelled' ? 'Cancelled' : state.control.reexams?.[slice.candidateId]?.status === 'granted' ? 'Re-exam granted' : slice.phase}</td>
-                <td>{Object.values(slice.responses).filter((r) => r.answer !== undefined).length}/{QUESTIONS.length}</td>
+                <td>{Object.values(slice.responses).filter((r) => r.answer !== undefined).length}/{BLUEPRINT.length}</td>
                 <td>{fmtClock(rep.offlineSeconds)}</td>
                 <td>{rep.items.length ? rep.items.map((item) => `${item.line} [${slice.acknowledgements?.[item.key]?.answer === 'yes' ? 'confirmed' : slice.acknowledgements?.[item.key]?.answer === 'no' ? 'DISPUTED' : 'not yet confirmed'}]`).join(' ') : 'none'}</td>
                 <td>{slice.startedAt ? rec.ok ? 'validated' : rec.checks.filter((c) => !c.ok).map((c) => c.label).join(', ') : '—'}</td>

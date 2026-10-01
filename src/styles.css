@@ -532,3 +532,23 @@ input[type=checkbox], input[type=radio] { accent-color: var(--ink); }
 .report-page h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); border-bottom: 1px solid var(--line); padding-bottom: 6px; }
 @media (max-width: 1180px) { .infra-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media print { .no-print { display: none !important; } .report-page { padding: 0; } body { background: #fff; } }
+
+/* ---------- centre mode: callouts, invigilator seat map ---------- */
+.callout { display: block; padding: 10px 12px; border-radius: 8px; background: var(--warn-soft); border: 1px solid #ecd6b0; color: var(--ink); font-size: 13px; margin: 0; }
+.doc-page > .doc-card.wide { max-width: 1120px; }
+.invigilator .lab { margin-top: 18px; }
+.invigilator .lab h2 { font-size: 15px; margin: 0 0 10px; }
+.invigilator .lab h2 small { color: var(--faint); font-weight: 500; margin-left: 8px; }
+.seat-grid { display: grid; gap: 12px; }
+.seat { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 8px; background: var(--paper); font-size: 13px; min-width: 0; }
+.seat.info { border-left-color: var(--accent); }
+.seat.good { border-left-color: var(--good); }
+.seat.warn { border-left-color: var(--warn); background: var(--warn-soft); }
+.seat.bad { border-left-color: var(--bad); background: var(--bad-soft); }
+.seat header { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.seat p { margin: 0; display: grid; }
+.seat p small { color: var(--muted); }
+.seat select, .seat input { min-width: 0; font: inherit; font-size: 12px; padding: 5px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink); }
+.seat form input { flex: 1; }
+@media (max-width: 720px) { .seat-grid { grid-template-columns: 1fr !important; } .seat-grid > div { grid-row: auto !important; grid-column: auto !important; } }
+.callout svg { vertical-align: -2px; margin-right: 6px; }

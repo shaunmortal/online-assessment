@@ -3,13 +3,14 @@ import {
   AlertTriangle, BadgeCheck, Bot, Camera, Check, ChevronLeft, ChevronRight, CircleAlert, Clock3, Eye, Flag, Loader2,
   LockKeyhole, Maximize, Megaphone, Mic, Play, ReceiptText, RefreshCw, Send, ShieldAlert, Wifi, WifiOff, XCircle,
 } from 'lucide-react'
-import { apiReachable, lockState, offlineSeconds, openIncidents, remainingSeconds, sha256, windowEndsAt, EXAM_SECONDS, TAB_LOCK_MINUTES, type CandidateSlice, type ExamState, type Lang, type Receipt } from './lib/core'
+import { apiReachable, lockState, offlineSeconds, openIncidents, remainingSeconds, windowEndsAt, EXAM_SECONDS, TAB_LOCK_MINUTES, type CandidateSlice, type ExamState, type Lang, type Receipt } from './lib/core'
 import { probeSaveChannel } from './lib/idb'
 import { pythonLoaded, runCases, type CaseResult } from './lib/runner'
 
 interface CodeDraft { code: string; lang: CodeLang }
-import { CODE_LANGS, PAPER, QUESTIONS, SECTIONS, questionById, rosterEntry, type CodeLang, type CodingQuestion, type McqQuestion, type Question } from './data/paper'
-import { messagesFor, sessionReport, type ExamApi, type ReportItem } from './state'
+import { BLUEPRINT, CODE_LANGS, PAPER, SECTIONS, rosterEntry, seatLabel, type CodeLang, type CodingQuestion, type McqQuestion, type Question } from './data/paper'
+import { QUESTIONS, loadPaper, paperInfo, questionById } from './lib/paperClient'
+import { DOB_KEY, messagesFor, sessionReport, type ExamApi, type ReportItem } from './state'
 import { useAiProctor, useIntegrity, type Integrity } from './hooks/useIntegrity'
 import { BinaryTree, Brand, fmtClock, fmtTime, Pill, ReceiptModal, useNow } from './ui'
 
@@ -43,9 +44,38 @@ export function CandidateApp({ api }: { api: ExamApi }) {
     case 'login': return <Login api={api} integrity={integrity} />
     case 'instructions': return <Instructions api={api} integrity={integrity} />
     case 'gate': return <Gate api={api} integrity={integrity} />
-    case 'exam': return <Exam api={api} integrity={integrity} aiCheck={ai.checkNow} aiEnabled={Boolean(ai.config?.enabled)} />
+    case 'exam': return <PaperReady api={api}><Exam api={api} integrity={integrity} aiCheck={ai.checkNow} aiEnabled={Boolean(ai.config?.enabled)} /></PaperReady>
     default: return <Submitted api={api} />
   }
+}
+
+// A reloaded or moved exam tab re-downloads and re-verifies the paper (or re-verifies its offline copy).
+function PaperReady({ api, children }: { api: ExamApi; children: React.ReactNode }) {
+  const [ready, setReady] = useState(QUESTIONS.length > 0)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    if (ready) return
+    let alive = true
+    let timer: number | undefined
+    const attempt = () => void loadPaper(api.me ?? '', window.sessionStorage.getItem(DOB_KEY) ?? '', api.state.sessionId).then((result) => {
+      if (!alive) return
+      if (result.ok) return setReady(true)
+      setError(result.reason)
+      timer = window.setTimeout(attempt, 5000)
+    })
+    attempt()
+    return () => { alive = false; window.clearTimeout(timer) }
+  }, [ready, api.me, api.state.sessionId])
+  if (ready) return <>{children}</>
+  return (
+    <main className="doc-page">
+      <section className="doc-card center">
+        <Loader2 size={28} className="spin" />
+        <h1>Verifying your signed question paper…</h1>
+        <p className="muted">{error ? `${error} Retrying every 5 seconds. Your timer and saved answers are safe.` : 'Checking the exam authority signature and every question before showing the paper.'}</p>
+      </section>
+    </main>
+  )
 }
 
 // ---------------------------------------------------------------- login
@@ -75,7 +105,7 @@ function Login({ api, integrity }: { api: ExamApi; integrity: Integrity }) {
           <h1>{PAPER.title}</h1>
           <dl className="hero-facts">
             <div><dt>Duration</dt><dd>{EXAM_SECONDS / 60} min</dd></div>
-            <div><dt>Questions</dt><dd>{QUESTIONS.length}</dd></div>
+            <div><dt>Questions</dt><dd>{BLUEPRINT.length}</dd></div>
             <div><dt>Sections</dt><dd>{SECTIONS.length}</dd></div>
           </dl>
           <p className="hero-note">Your answers are saved on this device and on the exam server after every choice. If your connection drops, stay on the page — lost time is measured and reviewed fairly.</p>
@@ -135,14 +165,16 @@ function Instructions({ api, integrity }: { api: ExamApi; integrity: Integrity }
   const [agreed, setAgreed] = useState(false)
   const [lang, setLang] = useState<Lang>(api.mine!.lang)
   const entry = rosterEntry(api.me ?? undefined)
+  const centre = Boolean(api.state.control.centreMode)
+  const cameraOk = centre || integrity.faces === 1 || integrity.mediaStatus === 'denied' || integrity.mediaStatus === 'unavailable'
   return (
     <main className="doc-page">
-      <header className="bar"><Brand inverse /><span>{entry?.name} · {entry?.id}</span></header>
+      <header className="bar"><Brand inverse /><span>{entry?.name} · {entry?.id}{centre ? ` · ${seatLabel(entry)}` : ''}</span></header>
       <section className="doc-card">
         <h1>General Instructions</h1>
         <table className="table">
           <thead><tr><th>Section</th><th>Questions</th><th>Marking</th></tr></thead>
-          <tbody>{SECTIONS.map((section) => <tr key={section.id}><td>{section.name.en}</td><td>{QUESTIONS.filter((q) => q.section === section.id).length}</td><td>{section.marks}</td></tr>)}</tbody>
+          <tbody>{SECTIONS.map((section) => <tr key={section.id}><td>{section.name.en}</td><td>{BLUEPRINT.filter((q) => q.section === section.id).length}</td><td>{section.marks}</td></tr>)}</tbody>
         </table>
         <ol className="rules">
           <li>Total duration is <b>{EXAM_SECONDS / 60} minutes</b>. The clock keeps running if you reload or lose the connection, and the exam auto-submits at 00:00:00.</li>
@@ -151,7 +183,9 @@ function Instructions({ api, integrity }: { api: ExamApi; integrity: Integrity }
             <span className="legend-inline"><i className="st not-visited" /> Not visited <i className="st not-answered" /> Not answered <i className="st answered" /> Answered <i className="st marked" /> Marked for review <i className="st answered-marked" /> Answered &amp; marked</span>
           </li>
           <li>The paper is protected by <b>BlurShield</b>: only the area under your pointer or keyboard focus is sharp. Press <kbd>Alt</kbd>+<kbd>R</kbd> for a 15-second wider reading lens. Diagrams stay clear.</li>
-          <li>Camera, microphone and fullscreen are required for the whole exam. From the moment you allow the camera until you submit, an on-device face monitor and the AI proctor watch continuously for other people, phones and an empty seat. Leaving fullscreen, copy/paste and every observation are reported to the exam officer.</li>
+          {centre
+            ? <li>This is an <b>exam-centre</b> sitting at <b>{entry?.centre} · {seatLabel(entry)}</b>. The invigilator verifies your admit card and photo ID at your seat before your timer can start. Fullscreen is required; a camera is used only if this PC has one.</li>
+            : <li>Camera, microphone and fullscreen are required for the whole exam. From the moment you allow the camera until you submit, an on-device face monitor and the AI proctor watch continuously for other people, phones and an empty seat. Leaving fullscreen, copy/paste and every observation are reported to the exam officer.</li>}
           <li><b>Tab switching</b> is reported to the exam officer immediately: 1st time a warning, 2nd time the paper is <b>locked for {TAB_LOCK_MINUTES} minutes</b> (the timer keeps running), 3rd time the exam is <b>suspended</b> until the officer resumes or cancels it.</li>
           <li>If the connection drops, <b>do not close the tab</b>. <b>Keep answering</b> — every answer is saved on this device and syncs automatically when the internet returns. The timer keeps running; your offline time is shown next to it and reported to the exam office.</li>
           <li>Coding problems come with a function template in JavaScript or Python. Complete the function; the read-only driver code handles input and output. <b>Run samples</b> checks the visible cases, <b>Submit code</b> also runs hidden test cases.</li>
@@ -164,8 +198,8 @@ function Instructions({ api, integrity }: { api: ExamApi; integrity: Integrity }
         </label>
         <label className="declaration"><input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} /> I have read the instructions, I will not use unfair means, and I consent to camera/microphone monitoring and AI-assisted frame review for this exam.</label>
         <CameraCheck integrity={integrity} />
-        <button className="btn primary" disabled={!agreed || !(integrity.faces === 1 || integrity.mediaStatus === 'denied' || integrity.mediaStatus === 'unavailable')} onClick={() => api.acceptInstructions(lang)}>
-          {!agreed ? 'Accept the declaration to continue' : integrity.mediaStatus !== 'ready' && integrity.mediaStatus !== 'denied' && integrity.mediaStatus !== 'unavailable' ? 'Allow camera & microphone to continue' : integrity.faces === 1 || integrity.mediaStatus !== 'ready' ? 'I am ready — run system check' : 'Waiting for your face to be detected'} <ChevronRight size={16} />
+        <button className="btn primary" disabled={!agreed || !cameraOk} onClick={() => api.acceptInstructions(lang)}>
+          {!agreed ? 'Accept the declaration to continue' : centre ? 'I am ready — run system check' : integrity.mediaStatus !== 'ready' && integrity.mediaStatus !== 'denied' && integrity.mediaStatus !== 'unavailable' ? 'Allow camera & microphone to continue' : integrity.faces === 1 || integrity.mediaStatus !== 'ready' ? 'I am ready — run system check' : 'Waiting for your face to be detected'} <ChevronRight size={16} />
         </button>
         {(integrity.mediaStatus === 'denied' || integrity.mediaStatus === 'unavailable') && <p className="muted small">No camera? You can continue to the system check and request an officer-approved assisted entry there.</p>}
       </section>
@@ -177,19 +211,11 @@ function Instructions({ api, integrity }: { api: ExamApi; integrity: Integrity }
 
 interface CheckResult { label: string; detail: string; ok: boolean | null }
 
-async function servedPaperHash(state: ExamState) {
-  // The simulated exam API serves the paper; the "wrong paper" fault serves an older Paper B build.
-  const served = state.control.faults.wrongPaper
-    ? { code: 'Paper B', version: '2025.03-B', questions: QUESTIONS.slice(0, 11) }
-    : { code: PAPER.code, version: PAPER.version, questions: QUESTIONS }
-  return { served, hash: await sha256(JSON.stringify(served.questions)) }
-}
-
-async function runPlatformChecks(state: ExamState, candidateId: string, lang: Lang): Promise<CheckResult[]> {
-  const expectedHash = await sha256(JSON.stringify(QUESTIONS))
-  const { served, hash } = await servedPaperHash(state)
-  const manifestOk = served.code === PAPER.code && served.version === PAPER.version && served.questions.length === QUESTIONS.length && hash === expectedHash
-  const langOk = served.questions.every((q) => (q.type === 'mcq' ? q.text[lang]?.prompt && q.text[lang].options.length === 4 : q.text[lang]?.statement))
+async function runPlatformChecks(state: ExamState, candidateId: string, lang: Lang): Promise<{ checks: CheckResult[]; tampered?: string }> {
+  // Download → signature → time-locked key → decrypt → per-question hash, before the timer can start.
+  const paper = await loadPaper(candidateId, window.sessionStorage.getItem(DOB_KEY) ?? '', state.sessionId)
+  const manifestOk = paper.ok && paper.code === PAPER.code && paper.version === PAPER.version && paper.count === BLUEPRINT.length
+  const langOk = paper.ok && QUESTIONS.every((q) => (q.type === 'mcq' ? q.text[lang]?.prompt && q.text[lang].options.length === 4 : q.text[lang]?.statement))
 
   const drift = await new Promise<number>((resolve) => {
     const started = performance.now()
@@ -218,13 +244,13 @@ async function runPlatformChecks(state: ExamState, candidateId: string, lang: La
     heartbeat = { label: 'Exam-server heartbeat', detail: 'No response from the exam server. Check your internet connection.', ok: false }
   }
 
-  return [
-    { label: 'Paper manifest', detail: manifestOk ? `${served.code} · v${served.version} · ${served.questions.length} items · #${hash.slice(0, 10)}` : `Served ${served.code} v${served.version} with ${served.questions.length} items; expected ${PAPER.code} v${PAPER.version} with ${QUESTIONS.length}. Entry blocked.`, ok: manifestOk },
-    { label: 'Language pack', detail: langOk ? `${lang === 'hi' ? 'Hindi' : 'English'} available for all ${served.questions.length} items` : 'Selected language is missing for some items.', ok: langOk },
+  return { tampered: !paper.ok && paper.tampered ? paper.reason : undefined, checks: [
+    { label: 'Signed paper', detail: paper.ok ? `${paper.code} · v${paper.version} · ${paper.count} items · authority signature valid · every question matches its signed hash · fingerprint #${paper.root.slice(0, 12)}${paper.cached ? ' (verified offline copy)' : ''}` : `${paper.reason} Entry blocked.`, ok: manifestOk },
+    { label: 'Language pack', detail: langOk ? `${lang === 'hi' ? 'Hindi' : 'English'} available for all ${QUESTIONS.length} items` : paper.ok ? 'Selected language is missing for some items.' : 'Waiting for a verified paper.', ok: langOk },
     { label: 'Exam timer', detail: drift < 60 ? `${fmtClock(EXAM_SECONDS)} configured · clock drift ${Math.round(drift)} ms` : `Timer drift ${Math.round(drift)} ms is too high`, ok: drift < 60 },
     save,
     heartbeat,
-  ]
+  ] }
 }
 
 function Gate({ api, integrity }: { api: ExamApi; integrity: Integrity }) {
@@ -233,13 +259,19 @@ function Gate({ api, integrity }: { api: ExamApi; integrity: Integrity }) {
   const [checks, setChecks] = useState<CheckResult[]>([])
   const [running, setRunning] = useState(false)
   const lastOutcome = useRef('')
+  const reportedTamper = useRef('')
   const faults = state.control.faults
   const assistedApproved = Boolean(state.control.assistedApproved[mine.candidateId])
 
   const run = useCallback(async () => {
     setRunning(true)
-    const results = await runPlatformChecks(api.state, mine.candidateId, mine.lang)
+    const { checks: results, tampered } = await runPlatformChecks(api.state, mine.candidateId, mine.lang)
     setChecks(results)
+    if (tampered && reportedTamper.current !== tampered) {
+      reportedTamper.current = tampered
+      const entry = rosterEntry(mine.candidateId)
+      api.recordSignal(`PAPER TAMPERED — detected on ${mine.candidateId}'s PC (${entry?.centre})`, `${tampered} The PC refused to show the paper. Signature checked against the exam authority key ${paperInfo?.keyId ?? ''}.`.trim(), 'integrity', { alert: true, action: 'paper-tampered', path: entry?.path ?? null })
+    }
     setRunning(false)
     const failures = results.filter((r) => !r.ok).map((r) => `${r.label}: ${r.detail}`)
     const outcome = failures.join('|') || 'pass'
@@ -251,10 +283,14 @@ function Gate({ api, integrity }: { api: ExamApi; integrity: Integrity }) {
 
   // Re-run whenever the operator changes a fault or an outage starts/ends.
   const incidentKey = openIncidents(state).map((incident) => incident.id).join(',')
-  useEffect(() => { void run() }, [faults.wrongPaper, faults.saveChannelDown, incidentKey, api.serverReachable]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void run() }, [state.control.paperTamper, faults.saveChannelDown, incidentKey, api.serverReachable]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const platformOk = checks.length > 0 && checks.every((c) => c.ok)
-  const proctorOk = (integrity.mediaStatus === 'ready' && integrity.faces === 1 && integrity.isFullscreen) || assistedApproved
+  const centre = Boolean(state.control.centreMode)
+  const verified = state.control.verified?.[mine.candidateId]
+  const proctorOk = centre
+    ? Boolean(verified) && (integrity.isFullscreen || assistedApproved)
+    : (integrity.mediaStatus === 'ready' && integrity.faces === 1 && integrity.isFullscreen) || assistedApproved
 
   // While a check is failing, retry every 10 s; after 2 minutes without success the candidate can report it.
   const [blockedSince, setBlockedSince] = useState<number | null>(null)
@@ -295,15 +331,18 @@ function Gate({ api, integrity }: { api: ExamApi; integrity: Integrity }) {
         </div>
 
         <div className="doc-card">
-          <h2>Proctoring setup</h2>
-          <CameraCheck integrity={integrity} />
+          <h2>{centre ? 'Seat check' : 'Proctoring setup'}</h2>
+          {centre && (verified
+            ? <Pill tone="good"><BadgeCheck size={13} /> Identity verified at {seatLabel(rosterEntry(mine.candidateId))} by {verified.by} · {fmtTime(verified.at)}</Pill>
+            : <p className="callout"><Loader2 size={14} className="spin" /> Raise your hand: the invigilator must verify your admit card and photo ID at <b>{seatLabel(rosterEntry(mine.candidateId))}</b> before you can start.</p>)}
+          {!centre && <CameraCheck integrity={integrity} />}
           {!integrity.isFullscreen && !assistedApproved && <button className="btn" onClick={() => void integrity.requestFullscreen()}><Maximize size={15} /> Enter fullscreen</button>}
           {proctorOk && !assistedApproved && <Pill tone="good"><BadgeCheck size={13} /> Camera, face and fullscreen ready</Pill>}
           <button className="link-btn" onClick={api.requestAssisted} disabled={mine.assistedRequested}>
             {assistedApproved ? 'Assisted entry approved by officer' : mine.assistedRequested ? 'Assisted review requested — waiting for officer' : 'Cannot use camera or fullscreen? Request assisted review'}
           </button>
           <button className="btn primary wide" disabled={!platformOk || !proctorOk} onClick={() => { api.startExam(); if (!integrity.isFullscreen && !assistedApproved) void integrity.requestFullscreen() }}>
-            {platformOk && proctorOk ? 'Start exam' : 'Complete all checks to start'} <ChevronRight size={16} />
+            {platformOk && proctorOk ? 'Start exam' : centre && !verified ? 'Waiting for the invigilator' : 'Complete all checks to start'} <ChevronRight size={16} />
           </button>
         </div>
       </section>
@@ -510,7 +549,7 @@ function Exam({ api, integrity, aiCheck, aiEnabled }: { api: ExamApi; integrity:
   const locked = lock !== 'none'
   const lockLeft = lock === 'locked' ? Math.max(0, Math.round((Date.parse(candidate.lockedUntil!) - nowMs) / 1000)) : 0
   const assisted = Boolean(state.control.assistedApproved[candidate.candidateId])
-  const needsProctoring = !assisted && !locked && (integrity.mediaStatus !== 'ready' || !integrity.isFullscreen)
+  const needsProctoring = !assisted && !locked && ((!state.control.centreMode && integrity.mediaStatus !== 'ready') || !integrity.isFullscreen)
   const savedCount = Object.values(candidate.responses).filter((response) => response.answer !== undefined).length
   const queuedCount = state.checkpoints.filter((c) => c.candidateId === candidate.candidateId && c.status === 'queued').length
 
@@ -518,7 +557,7 @@ function Exam({ api, integrity, aiCheck, aiEnabled }: { api: ExamApi; integrity:
     <main className={`exam ${offline ? 'is-offline' : ''}`}>
       <header className="exam-head">
         <Brand />
-        <div className="exam-title"><b>{PAPER.title}</b><small>{PAPER.code} · v{PAPER.version}</small></div>
+        <div className="exam-title"><b>{PAPER.title}</b><small>{PAPER.code} · v{PAPER.version}{paperInfo ? ` · signed #${paperInfo.root.slice(0, 8)}` : ''}</small></div>
         <div className={`timer ${remaining < 300 ? 'low' : ''}`} aria-live="off"><Clock3 size={16} /><span><small>Time left</small><b>{fmtClock(remaining)}</b></span></div>
         {offlineTotal > 0 && <div className={`timer offline ${offline ? 'live' : ''}`} aria-live="off"><WifiOff size={16} /><span><small>{offline ? 'Offline now' : 'Offline total'}</small><b>{fmtClock(offlineTotal)}</b></span></div>}
         <div className="who">
@@ -745,12 +784,14 @@ function McqView({ question, lang, state, candidate, api, ...shield }: ViewProps
         <p className="prompt">{text.prompt}</p>
         <fieldset className="options">
           <legend className="sr-only">Options</legend>
-          {text.options.map((option, i) => {
-            const key = String.fromCharCode(65 + i)
+          {(question.order ?? text.options.map((_, i) => i)).map((canonical, i) => {
+            // Shown letters follow this candidate's shuffle; the saved answer is the canonical option.
+            const key = String.fromCharCode(65 + canonical)
+            const shown = String.fromCharCode(65 + i)
             return (
               <label key={key} className={selected === key ? 'selected' : ''}>
-                <input type="radio" name={question.id} value={key} checked={selected === key} onChange={() => void api.saveAnswer(question.id, key)} />
-                <span className="opt-key">{key}</span><span>{option}</span>
+                <input type="radio" name={question.id} value={shown} checked={selected === key} onChange={() => void api.saveAnswer(question.id, key)} />
+                <span className="opt-key">{shown}</span><span>{text.options[canonical]}</span>
               </label>
             )
           })}
@@ -1000,7 +1041,8 @@ function Submitted({ api }: { api: ExamApi }) {
           ? 'A verified interruption on your session exceeded the policy threshold. All answers up to the interruption are preserved; the exam body will share your new slot. This does not affect your eligibility.'
           : `Submitted at ${fmtTime(candidate.submittedAt)}${candidate.submitReason === 'time-up' ? ' (time-up auto-submit)' : ''}.`}</p>
         {submission?.data?.responseDigest && <p className="digest">Response digest <code>{String(submission.data.responseDigest)}</code></p>}
-        <p>{String(submission?.data?.answered ?? 0)} of {QUESTIONS.length} questions answered.</p>
+        <p>{String(submission?.data?.answered ?? 0)} of {BLUEPRINT.length} questions answered.</p>
+        {submission?.data?.paperRoot && <p className="digest">Paper fingerprint <code>{String(submission.data.paperRoot).slice(0, 16)}</code> — the authority-signed paper you were shown</p>}
         {report.items.length > 0 && !candidate.acknowledgedAt
           ? <ConfirmIssues items={report.items} lang={candidate.lang} onConfirm={api.acknowledge} />
           : (

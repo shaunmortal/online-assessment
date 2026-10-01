@@ -4,7 +4,7 @@ import {
   Minimize, RefreshCw, RotateCcw, ShieldAlert, ShieldCheck, ShieldX, Siren, UsersRound, Wifi, WifiOff, Zap,
 } from 'lucide-react'
 import { lockState, offlineSeconds, remainingSeconds, verifyChain, windowEndsAt, type AuditEvent, type ChainReport, type ExamState, type Incident, type Policy } from './lib/core'
-import { QUESTIONS, ROSTER, rosterEntry } from './data/paper'
+import { BLUEPRINT, ROSTER, rosterEntry } from './data/paper'
 import { AnalyticsPanel, Announcements, CopilotBox, EarlyWarnings, InfraPanel } from './analyticsView'
 import { deviceRisk } from './lib/analytics'
 import { analyseIncident, heartbeatAge, OFFICER, reexamEvidence, sessionReport, type ExamApi } from './state'
@@ -32,7 +32,7 @@ export function OpsApp({ api }: { api: ExamApi }) {
   const [reportFor, setReportFor] = useState<string | null>(null)
   const [dismissed, setDismissed] = useState<string[]>([])
   // Tab-switch escalations reach the officer immediately.
-  const alerts = state.audit.filter((item) => item.kind === 'integrity' && (typeof item.data?.tabSwitch === 'number' || item.data?.alert === true) && !dismissed.includes(item.id)).slice(-6).reverse()
+  const alerts = state.audit.filter((item) => ((item.kind === 'integrity' && typeof item.data?.tabSwitch === 'number') || item.data?.alert === true) && !dismissed.includes(item.id)).slice(-6).reverse()
 
   const slices = Object.values(state.candidates)
   const inExam = slices.filter((slice) => slice.phase === 'exam')
@@ -79,8 +79,10 @@ export function OpsApp({ api }: { api: ExamApi }) {
 
       <section className="ops-main">
         <header className="ops-head">
-          <div><small>Exam Control Tower</small><h1>Morning shift · {QUESTIONS.length}-item paper</h1></div>
+          <div><small>Exam Control Tower</small><h1>Morning shift · {BLUEPRINT.length}-item paper</h1></div>
           <div className="row">
+            <label className="toggle" title="Exam-centre mode: camera optional; the invigilator verifies identity at the seat"><input type="checkbox" checked={Boolean(state.control.centreMode)} onChange={(e) => api.setCentreMode(e.target.checked)} /> Centre mode</label>
+            <a className="btn small" href="/invigilator" target="_blank" rel="noreferrer">Invigilator console ↗</a>
             <span className="window-box">
               <small>Exam window</small>
               <b>{windowLeft > 0 ? `closes in ${fmtClock(windowLeft)}` : 'closed'}</b>
@@ -152,7 +154,7 @@ export function OpsApp({ api }: { api: ExamApi }) {
                         {slice.submitReason === 'reschedule' && !slice.report && <small>Reschedule</small>}
                       </td>
                       <td><small>{slice.device ?? '—'}</small><small>since {fmtTime(slice.loggedInAt)}</small></td>
-                      <td>{slice.startedAt ? <><b>{answered}/{QUESTIONS.length}</b><small>on Q{QUESTIONS.findIndex((q) => q.id === slice.current) + 1}</small></> : '—'}</td>
+                      <td>{slice.startedAt ? <><b>{answered}/{BLUEPRINT.length}</b><small>on {slice.current}</small></> : '—'}</td>
                       <td>{slice.startedAt ? fmtClock(remainingSeconds(state, entry.id, nowMs)) : '—'}</td>
                       <td>
                         {slice.phase === 'gate' ? (age <= 8 ? <small>system check · {age}s ago</small> : <Pill tone="bad"><WifiOff size={12} /> silent {age}s at system check</Pill>) : live ? hbOk ? <Pill tone="good"><Wifi size={12} /> {age}s ago</Pill> : <Pill tone="bad"><WifiOff size={12} /> {outage ? `offline ${fmtClock(Math.round((nowMs - Date.parse(outage.from)) / 1000))}` : `silent ${age}s`}</Pill> : '—'}
@@ -207,7 +209,12 @@ export function OpsApp({ api }: { api: ExamApi }) {
           <div className="sim-grid">
             <div>
               <h3>Pre-exam faults (readiness gate)</h3>
-              <label className="toggle"><input type="checkbox" checked={state.control.faults.wrongPaper} onChange={(e) => api.setFault('wrongPaper', e.target.checked)} /> Serve wrong paper version</label>
+              <label className="toggle">Alter paper in transit for
+                <select aria-label="Tamper drill path" value={state.control.paperTamper ?? ''} onChange={(e) => api.setPaperTamper(e.target.value)}>
+                  <option value="">nobody (genuine paper)</option>
+                  {PATHS.map((path) => <option key={path} value={path}>{path} · {ROSTER.find((entry) => entry.path === path)?.centre}</option>)}
+                </select>
+              </label>
               <label className="toggle"><input type="checkbox" checked={state.control.faults.saveChannelDown} onChange={(e) => api.setFault('saveChannelDown', e.target.checked)} /> Disable answer-save channel</label>
             </div>
             <div>

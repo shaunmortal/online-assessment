@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import QRCode from 'qrcode'
 import { CheckCircle2, Download, ShieldCheck, ShieldX, X } from 'lucide-react'
 import { verifyReceipt, type ExamState, type Receipt, type ReceiptCheck } from './lib/core'
+import { serverKey } from './lib/paperClient'
 
 // ---- officer passcode (only enforced when the server has OFFICER_PASSCODE set)
 const OFFICER_KEY = 'examshield:officer'
@@ -99,11 +100,6 @@ export function BinaryTree() {
   )
 }
 
-let publicKey: Promise<{ key: CryptoKey; keyId: string } | null> | undefined
-const serverKey = () => (publicKey ??= fetch('/api/public-key')
-  .then((response) => response.json())
-  .then(async (body) => ({ keyId: body.keyId as string, key: await crypto.subtle.importKey('jwk', body.jwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']) }))
-  .catch(() => { publicKey = undefined; return null }))
 
 export type SignatureStatus = 'valid' | 'invalid' | 'unsigned' | 'unavailable'
 

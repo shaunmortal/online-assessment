@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test": "tsx src/lib/core.test.ts && tsx src/lib/analytics.test.ts",
+    "test": "tsx src/lib/core.test.ts && tsx src/lib/analytics.test.ts && tsx server/paperService.test.ts",
     "dev:lan": "EXAM_HTTPS=1 vite --host 0.0.0.0",
     "loadtest": "node scripts/load-test.mjs",
     "start": "vite preview --host 0.0.0.0 --port ${PORT:-5190}"

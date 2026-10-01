@@ -1,7 +1,7 @@
 // Pure analytics over the shared exam state: early warning, pattern detection, reconciliation,
 // exam-level decision support and systemic risk. Everything here is review-only evidence.
 import { offlineSeconds, secondsBetween, type CandidateSlice, type ExamState } from './core'
-import { QUESTIONS, rosterEntry } from '../data/paper'
+import { BLUEPRINT, adjacentSeats, rosterEntry, seatLabel } from '../data/paper'
 
 const MIN = 60_000
 
@@ -78,31 +78,53 @@ export function pathHealth(state: ExamState, at = Date.now()): PathHealth[] {
 
 // ---------- suspicious patterns across candidates ----------
 
-export interface PatternFlag { kind: 'collusion' | 'same-code' | 'rapid-correct'; candidates: string[]; detail: string }
+export interface PatternFlag { kind: 'collusion' | 'timing-sync' | 'same-code' | 'rapid-correct'; candidates: string[]; detail: string; adjacent?: boolean }
 
-export function patternFlags(state: ExamState): PatternFlag[] {
+// Answer key (question id -> letter) comes from the exam server, officers only; never in the client bundle.
+export type AnswerKey = Record<string, string>
+
+export function patternFlags(state: ExamState, keys: AnswerKey = {}): PatternFlag[] {
   const flags: PatternFlag[] = []
   const slices = Object.values(state.candidates).filter((slice) => slice.startedAt)
-  const mcqs = QUESTIONS.filter((question) => question.type === 'mcq')
-  const letter = (index: number) => String.fromCharCode(65 + index)
-  // Identical WRONG answers are the classic collusion signal (identical right answers are expected).
+  const mcqs = BLUEPRINT.filter((question) => question.type === 'mcq')
+  // When each candidate first gave their final answer to each question (from the checkpoint log).
+  const answeredAt = new Map<string, Map<string, number>>()
+  for (const c of state.checkpoints) {
+    if (!/^[A-D]$/.test(c.answer)) continue
+    const own = answeredAt.get(c.candidateId) ?? new Map<string, number>()
+    if (state.candidates[c.candidateId]?.responses[c.question]?.answer === c.answer && !own.has(c.question)) own.set(c.question, Date.parse(c.at))
+    answeredAt.set(c.candidateId, own)
+  }
   for (let i = 0; i < slices.length; i += 1) {
     for (let j = i + 1; j < slices.length; j += 1) {
       const a = slices[i]
       const b = slices[j]
+      // Neighbouring seats in the same lab are where copying actually happens, so they need less evidence.
+      const adjacent = adjacentSeats(rosterEntry(a.candidateId), rosterEntry(b.candidateId))
+      const pair = [a.candidateId, b.candidateId]
+      const where = adjacent ? ` — neighbouring seats ${seatLabel(rosterEntry(a.candidateId))} / ${seatLabel(rosterEntry(b.candidateId))}` : ''
+      // Identical WRONG answers are the classic collusion signal (identical right answers are expected).
       let bothWrong = 0
       let sameWrong = 0
+      // Same answer to the same question within 15 s: with per-candidate shuffled order this is not chance.
+      let synced = 0
       for (const question of mcqs) {
-        if (question.type !== 'mcq') continue
         const x = a.responses[question.id]?.answer
         const y = b.responses[question.id]?.answer
-        const key = letter(question.key)
-        if (!x || !y || x === key || y === key) continue
+        if (!x || !y) continue
+        const tx = answeredAt.get(a.candidateId)?.get(question.id)
+        const ty = answeredAt.get(b.candidateId)?.get(question.id)
+        if (x === y && tx && ty && Math.abs(tx - ty) <= 15_000) synced += 1
+        const key = keys[question.id]
+        if (!key || x === key || y === key) continue
         bothWrong += 1
         if (x === y) sameWrong += 1
       }
-      if (sameWrong >= 3 && sameWrong / bothWrong >= 0.6) {
-        flags.push({ kind: 'collusion', candidates: [a.candidateId, b.candidateId], detail: `${sameWrong} identical wrong answers out of ${bothWrong} questions both got wrong` })
+      if (sameWrong >= (adjacent ? 2 : 3) && sameWrong / bothWrong >= (adjacent ? 0.5 : 0.6)) {
+        flags.push({ kind: 'collusion', candidates: pair, adjacent, detail: `${sameWrong} identical wrong answers out of ${bothWrong} questions both got wrong${where}` })
+      }
+      if (synced >= (adjacent ? 3 : 5)) {
+        flags.push({ kind: 'timing-sync', candidates: pair, adjacent, detail: `${synced} questions answered identically within 15 s of each other despite different question order${where}` })
       }
     }
   }
@@ -122,9 +144,8 @@ export function patternFlags(state: ExamState): PatternFlag[] {
     let streak = 0
     let best = 0
     for (let k = 1; k < own.length; k += 1) {
-      const question = mcqs.find((q) => q.id === own[k].question)
       const fast = Date.parse(own[k].at) - Date.parse(own[k - 1].at) < 4000
-      const correct = question?.type === 'mcq' && own[k].answer === letter(question.key)
+      const correct = keys[own[k].question] !== undefined && own[k].answer === keys[own[k].question]
       streak = fast && correct ? streak + 1 : 0
       best = Math.max(best, streak)
     }
@@ -149,7 +170,7 @@ export function reconcile(state: ExamState, id: string): { ok: boolean; checks: 
   checks.push({ label: 'Checkpoint sequence', ok: !gaps.length && !dupes.length, detail: gaps.length || dupes.length ? `missing #${gaps.join(', #') || '—'}; duplicate #${dupes.join(', #') || '—'}` : `${own.length} checkpoints, contiguous` })
   const badFormat = own.filter((c) => !/^([A-D]|\(cleared\)|code#[0-9A-F]{12} \(\d+ chars\)|\d+\/\d+ tests.*|code saved \(not evaluated\))$/.test(c.answer))
   checks.push({ label: 'Answer format', ok: !badFormat.length, detail: badFormat.length ? `${badFormat.length} malformed answer(s)` : 'every answer is a valid option, clear, or code hash' })
-  const unknown = own.filter((c) => !QUESTIONS.some((q) => q.id === c.question))
+  const unknown = own.filter((c) => !BLUEPRINT.some((q) => q.id === c.question))
   checks.push({ label: 'Questions exist in paper', ok: !unknown.length, detail: unknown.length ? `unknown: ${unknown.map((c) => c.question).join(', ')}` : 'all answers map to this paper' })
   const outside = own.filter((c) => (slice.startedAt && c.at < new Date(Date.parse(slice.startedAt) - 2000).toISOString()) || (slice.submittedAt && c.at > new Date(Date.parse(slice.submittedAt) + 5000).toISOString()))
   checks.push({ label: 'Inside the exam window', ok: !outside.length, detail: outside.length ? `${outside.length} answer(s) time-stamped before start or after submit` : 'all answers between start and submit' })
@@ -159,7 +180,7 @@ export function reconcile(state: ExamState, id: string): { ok: boolean; checks: 
   const queued = own.filter((c) => c.reconciledAt || c.status === 'queued')
   const suspicious = queued.filter((c) => !slice.outages.some((o) => c.at >= new Date(Date.parse(o.from) - 3000).toISOString() && c.at <= new Date(Date.parse(o.to ?? new Date().toISOString()) + 3000).toISOString()))
   checks.push({ label: 'Offline answers inside measured offline time', ok: !suspicious.length, detail: queued.length ? suspicious.length ? `${suspicious.length} offline answer(s) claim a time outside any measured outage` : `${queued.length} offline answer(s), all inside measured outages` : 'no offline answers' })
-  const mismatched = QUESTIONS.filter((q) => {
+  const mismatched = BLUEPRINT.filter((q) => {
     const last = [...own].reverse().find((c) => c.question === q.id)
     const answer = slice.responses[q.id]?.answer
     if (!last) return answer !== undefined && q.type === 'mcq'

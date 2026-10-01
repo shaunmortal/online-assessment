@@ -16,9 +16,25 @@ assert.equal(deviceRisk(slice('EXM-20841', { telemetry: { at: at(100), rttMs: 50
 // Collusion: identical wrong answers on A1..A4 (keys: A1=C, A2=B, A3=D, A4=A).
 const wrong = { A1: { answer: 'A' }, A2: { answer: 'D' }, A3: { answer: 'B' }, A4: { answer: 'C' } }
 const colluding: ExamState = { ...base, candidates: { 'EXM-20841': slice('EXM-20841', { responses: wrong }), 'EXM-20854': slice('EXM-20854', { responses: wrong }), 'EXM-20873': slice('EXM-20873', { responses: { A1: { answer: 'C' } } }) } }
-const flags = patternFlags(colluding)
+const KEYS = { A1: 'C', A2: 'B', A3: 'D', A4: 'A' }
+const flags = patternFlags(colluding, KEYS)
 assert.equal(flags.filter((f) => f.kind === 'collusion').length, 1)
 assert.deepEqual(flags[0].candidates, ['EXM-20841', 'EXM-20854'])
+assert.equal(flags[0].adjacent, true) // Lab A R1S1 / R1S2
+assert.equal(patternFlags(colluding).filter((f) => f.kind === 'collusion').length, 0) // no key, no wrong-answer claim
+
+// Seat-aware: 2 identical wrong answers flag neighbours, but not candidates in different centres.
+const two = { A1: { answer: 'A' }, A2: { answer: 'D' } }
+assert.equal(patternFlags({ ...base, candidates: { 'EXM-20841': slice('EXM-20841', { responses: two }), 'EXM-20854': slice('EXM-20854', { responses: two }) } }, KEYS).filter((f) => f.kind === 'collusion').length, 1)
+assert.equal(patternFlags({ ...base, candidates: { 'EXM-20841': slice('EXM-20841', { responses: two }), 'EXM-20873': slice('EXM-20873', { responses: two }) } }, KEYS).filter((f) => f.kind === 'collusion').length, 0)
+
+// Timing sync: neighbours give the same answers to the same questions within seconds of each other.
+const same = { A1: { answer: 'C' }, A2: { answer: 'B' }, A3: { answer: 'D' } }
+const tick = (id: string, q: string, answer: string, s: number, seq: number): Checkpoint => ({ id: `${id}${q}`, candidateId: id, question: q, answer, at: at(s), sequence: seq, status: 'verified' })
+const synced: ExamState = { ...base, candidates: { 'EXM-20841': slice('EXM-20841', { responses: same }), 'EXM-20854': slice('EXM-20854', { responses: same }) },
+  checkpoints: [tick('EXM-20841', 'A1', 'C', 100, 1), tick('EXM-20854', 'A1', 'C', 105, 1), tick('EXM-20841', 'A2', 'B', 200, 2), tick('EXM-20854', 'A2', 'B', 210, 2), tick('EXM-20841', 'A3', 'D', 300, 3), tick('EXM-20854', 'A3', 'D', 302, 3)] }
+assert.equal(patternFlags(synced, KEYS).filter((f) => f.kind === 'timing-sync').length, 1)
+assert.equal(patternFlags({ ...synced, checkpoints: synced.checkpoints.map((c) => c.candidateId === 'EXM-20854' ? { ...c, at: at(Date.parse(c.at) / 1000 - Date.parse(at(0)) / 1000 + 600) } : c) }, KEYS).filter((f) => f.kind === 'timing-sync').length, 0)
 
 // Reconciliation: clean log passes; an offline answer outside any measured outage is flagged.
 const cp = (seq: number, s: number, extra: Partial<Checkpoint> = {}): Checkpoint => ({ id: `c${seq}`, candidateId: 'EXM-20841', question: 'A1', answer: 'C', at: at(s), sequence: seq, status: 'verified', ...extra })

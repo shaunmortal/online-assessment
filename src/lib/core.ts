@@ -150,7 +150,11 @@ export interface ControlSlice {
   messages?: Message[] // announcements to candidates (manual or automatic on incidents)
   riskReport?: { at: string; model: string; result: unknown } // last Claude post-exam risk report
   rev?: number
-  faults: { wrongPaper: boolean; saveChannelDown: boolean }
+  faults: { saveChannelDown: boolean }
+  paperTamper?: string // drill: this service path is served a paper altered in transit ('' = off)
+  centreMode?: boolean // exam-centre mode: camera optional, invigilator verifies identity at the seat
+  verified?: Record<string, { at: string; by: string }> // invigilator identity checks (candidateId -> who/when)
+  seatMoves?: Record<string, string> // invigilator-approved move to a spare PC (candidateId -> time)
   incidents: Incident[]
   assistedApproved: Record<string, string> // candidateId -> approval time
   thresholdSeconds: number
@@ -185,7 +189,7 @@ export function createState(epoch = 0): ExamState {
     createdAt: at,
     epoch,
     candidates: {},
-    control: { updatedAt: at, faults: { wrongPaper: false, saveChannelDown: false }, incidents: [], assistedApproved: {}, thresholdSeconds: 180, graceSeconds: 20, windowMinutes: 60, reexams: {} },
+    control: { updatedAt: at, faults: { saveChannelDown: false }, incidents: [], assistedApproved: {}, thresholdSeconds: 180, graceSeconds: 20, windowMinutes: 60, reexams: {} },
     audit: [],
     checkpoints: [],
   }

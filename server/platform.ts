@@ -9,6 +9,7 @@ import { WebSocket, WebSocketServer } from 'ws'
 import { StateStore, createState, isExamState, isPatch, patchOf, verifyReceipt, type ExamState, type Receipt, type StatePatch } from '../src/lib/core'
 import { aiBudget, createProctorHandler, proctorStats, setAiDailyLimit, takeAiBudget } from './proctor'
 import { rosterEntry } from '../src/data/paper'
+import { createPaperHandler } from './paperService'
 
 // The exam server: sync relay with durable on-disk storage, health metrics, receipt signing,
 // backup/restore, and Claude-backed officer co-pilot + post-exam risk report.
@@ -282,9 +283,11 @@ export function attachPlatform(httpServer: Server | null | undefined, use: (hand
     next()
   })
   use(createProctorHandler(apiKey, intervalSeconds))
+  const paper = createPaperHandler({ privateKey: key.privateKey, keyId: key.keyId, getState: () => store.state, officerOk, readJson, send })
   use(async (req, res, next) => {
     const path = new URL(req.url ?? '/', 'http://localhost').pathname
     try {
+      if (await paper(req, res, path)) return
       if (path === '/api/health' && req.method === 'GET') {
         messages = messages.filter((time) => Date.now() - time < 60_000)
         const memory = process.memoryUsage()

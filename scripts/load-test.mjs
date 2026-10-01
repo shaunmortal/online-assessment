@@ -17,7 +17,7 @@ for (let i = 0; i < 40; i++) { try { if ((await fetch(`${BASE}/api/health`)).ok)
 
 const now = () => new Date().toISOString()
 const session = { sessionId: `run-load-${Date.now()}`, createdAt: now(), epoch: Date.now() }
-const control = { updatedAt: now(), rev: 1, faults: { wrongPaper: false, saveChannelDown: false }, incidents: [], assistedApproved: {}, thresholdSeconds: 180, graceSeconds: 20, windowMinutes: 60, reexams: {} }
+const control = { updatedAt: now(), rev: 1, faults: { saveChannelDown: false }, incidents: [], assistedApproved: {}, thresholdSeconds: 180, graceSeconds: 20, windowMinutes: 60, reexams: {} }
 const open = (url) => new Promise((resolve, reject) => { const ws = new WebSocket(url); ws.on('open', () => resolve(ws)); ws.on('error', reject) })
 
 // Control Tower observer: measures how long a candidate update takes to reach it.

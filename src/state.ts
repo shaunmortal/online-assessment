@@ -6,10 +6,12 @@ import {
   type Incident, type Lang, type Message, type Policy, type Receipt, type ResponseState,
 } from './lib/core'
 import { putCheckpoint, loadSnapshot, saveSnapshot } from './lib/idb'
-import { QUESTIONS, rosterEntry } from './data/paper'
+import { BLUEPRINT, rosterEntry, seatLabel } from './data/paper'
+import { QUESTIONS, paperInfo } from './lib/paperClient'
 
 const STORAGE_KEY = 'examshield:v3'
 const ME_KEY = 'examshield:me' // per tab, so one browser can host several candidates for testing
+export const DOB_KEY = 'examshield:dob' // per tab: needed to request the time-locked paper key
 const CHANNEL = 'examshield-sync-v3'
 const HEARTBEAT_MS = 2000
 const STALE_MS = 8000
@@ -117,6 +119,11 @@ export function sessionReport(state: ExamState, id: string, at = Date.now()): Se
   const noFace = matching((item) => item.kind === 'ai' && (item.title === 'No face in view' || (item.data?.source !== 'on-device' && item.data?.faces === 0)))
   add('absent', noFace.length, `Candidate not in view ${noFace.length} time(s)${first(noFace)}.`, `You were not visible on camera ${noFace.length} time(s)${first(noFace)}. Did you leave your seat or move out of view?`, `आप ${noFace.length} बार कैमरे में दिखाई नहीं दिए${firstHi(noFace)}। क्या आप अपनी सीट से उठे थे या कैमरे से हट गए थे?`)
   const device = matching((item) => item.kind === 'ai' && item.data?.device === true)
+  // Seat problems an invigilator recorded (power cut, PC failure, ...): the candidate confirms them too.
+  const seat = matching((item) => item.data?.action === 'invigilator-report' && item.data?.report !== 'malpractice')
+  add('seat', seat.length, `Invigilator recorded a seat problem ${seat.length} time(s): ${seat.map((item) => `${item.title.replace(/^INVIGILATOR: /, '').replace(/ at .*$/, '')} at ${time(item.at)}`).join(', ')}.`,
+    `The invigilator recorded a problem at your seat: ${seat.map((item) => `${item.title.replace(/^INVIGILATOR: /, '').replace(/ at .*$/, '').toLowerCase()} at ${time(item.at)}`).join(', ')}. Did this happen?`,
+    `निरीक्षक ने आपकी सीट पर समस्या दर्ज की: ${seat.map((item) => `${({ 'power-cut': 'बिजली कटौती', 'pc-failure': 'कंप्यूटर खराबी' } as Record<string, string>)[String(item.data?.report)] ?? 'सीट की समस्या'} (${time(item.at)})`).join(', ')}। क्या ऐसा हुआ था?`)
   add('device', device.length, `Phone or other device seen by the AI proctor ${device.length} time(s)${first(device)}.`, `A phone or other device was seen on camera ${device.length} time(s)${first(device)}. Was a device in view?`, `कैमरे में ${device.length} बार फ़ोन या कोई अन्य डिवाइस दिखा${firstHi(device)}। क्या कोई डिवाइस सामने था?`)
 
   const lines = items.map((item) => item.line)
@@ -459,6 +466,7 @@ export function useExam() {
     const entry = rosterEntry(rawId.trim().toUpperCase())
     if (!entry || entry.dob !== dob.replace(/\D/g, '')) return 'Invalid Candidate ID or Date of Birth.'
     window.sessionStorage.setItem(ME_KEY, entry.id)
+    window.sessionStorage.setItem(DOB_KEY, entry.dob)
     meRef.current = entry.id
     setMe(entry.id)
     const device = describeDevice()
@@ -466,11 +474,14 @@ export function useExam() {
       const existing = current.candidates[entry.id]
       const resumed = Boolean(existing && existing.phase !== 'login')
       const takeover = Boolean(resumed && existing!.deviceId && existing!.deviceId !== deviceId && (existing!.phase === 'exam' || existing!.phase === 'gate'))
+      // An invigilator-approved move to a spare PC (last 15 min) is a documented device change, not an alert.
+      const moved = Boolean(takeover && current.control.seatMoves?.[entry.id] && Date.now() - Date.parse(current.control.seatMoves[entry.id]) < 15 * 60_000)
       const claim = { device, deviceId, deviceClaimAt: now() }
-      const slice = resumed ? { ...existing!, ...claim, updatedAt: now(), rev: (existing!.rev ?? 0) + 1 } : { ...newCandidate(entry.id, QUESTIONS[0].id, device), ...claim, rev: (existing?.rev ?? 0) + 1 }
+      const slice = resumed ? { ...existing!, ...claim, updatedAt: now(), rev: (existing!.rev ?? 0) + 1 } : { ...newCandidate(entry.id, BLUEPRINT[0].id, device), ...claim, rev: (existing?.rev ?? 0) + 1 }
       return withEvents(
         { ...current, candidates: { ...current.candidates, [entry.id]: slice } },
-        ...(takeover ? [event('integrity', `SECOND DEVICE — ${entry.id} signed in on another device`, `The attempt moved to ${device}; the previous device was signed out automatically. Review whether this was a genuine device change.`, `Candidate app · ${entry.id}`, entry.id, { alert: true, action: 'device-takeover' })] : []),
+        ...(moved ? [event('access', `${entry.id} moved to a spare PC (approved by invigilator)`, `The attempt continues on ${device} with all saved answers; the timer kept running.`, `Candidate app · ${entry.id}`, entry.id, { action: 'seat-move' })] : []),
+        ...(takeover && !moved ? [event('integrity', `SECOND DEVICE — ${entry.id} signed in on another device`, `The attempt moved to ${device}; the previous device was signed out automatically. Review whether this was a genuine device change.`, `Candidate app · ${entry.id}`, entry.id, { alert: true, action: 'device-takeover' })] : []),
         event('access', resumed ? 'Candidate signed in again (session resumed)' : 'Candidate signed in', `${entry.name} (${entry.id}) at ${entry.centre} authenticated on ${device}.${resumed ? ` Resumed at phase "${existing!.phase}".` : ''}`, `Candidate app · ${entry.id}`, entry.id, { device, centre: entry.centre, resumed }),
       )
     })
@@ -513,14 +524,17 @@ export function useExam() {
     mutate((current) => {
       const slice = current.candidates[myId()]
       if (!slice || slice.phase === 'exam') return current
+      // First start opens this candidate's own (shuffled) first question.
+      const first = slice.startedAt ? slice.current : QUESTIONS[0]?.id ?? slice.current
       return withEvents(
         patchMe(current, {
           phase: 'exam',
           startedAt: slice.startedAt ?? now(),
           lastHeartbeatAt: now(),
-          responses: { ...slice.responses, [slice.current]: { ...slice.responses[slice.current], visited: true } },
+          current: first,
+          responses: { ...slice.responses, [first]: { ...slice.responses[first], visited: true } },
         }),
-        event('access', 'Exam timer started', `${myId()} passed the readiness gate and started the paper.`, mySource(), myId()),
+        event('access', 'Exam timer started', `${myId()} passed the readiness gate and started the paper${paperInfo ? ` (verified paper fingerprint #${paperInfo.root.slice(0, 12)})` : ''}.`, mySource(), myId(), paperInfo ? { paperRoot: paperInfo.root } : undefined),
       )
     })
   }, [mutate]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -579,12 +593,12 @@ export function useExam() {
     const id = myId()
     const slice = stateRef.current.candidates[id]
     if (slice?.phase !== 'exam') return
-    const answered = QUESTIONS.filter((question) => slice.responses[question.id]?.answer !== undefined).length
-    const digest = await sha256(JSON.stringify(QUESTIONS.map((question) => [question.id, slice.responses[question.id]?.answer ?? null, slice.responses[question.id]?.code ?? null])))
+    const answered = BLUEPRINT.filter((question) => slice.responses[question.id]?.answer !== undefined).length
+    const digest = await sha256(JSON.stringify(BLUEPRINT.map((question) => [question.id, slice.responses[question.id]?.answer ?? null, slice.responses[question.id]?.code ?? null])))
     const report = sessionReport(stateRef.current, id)
     mutate((latest) => withEvents(
       patchSlice(latest, id, { phase: 'submitted', submittedAt: now(), submitReason: reason }),
-      event('submission', reason === 'reschedule' ? 'Attempt closed for targeted reschedule' : reason === 'time-up' ? 'Exam auto-submitted at time-up' : 'Candidate submitted the exam', `${answered}/${QUESTIONS.length} answered. Response digest ${digest.slice(0, 16)}… Session report: ${report.lines.join(' ')}`, `Candidate app · ${id}`, id, { answered, responseDigest: digest, reason, offlineSeconds: report.offlineSeconds, outages: report.outages, tabSwitches: report.tabSwitches, warnings: report.warnings }),
+      event('submission', reason === 'reschedule' ? 'Attempt closed for targeted reschedule' : reason === 'time-up' ? 'Exam auto-submitted at time-up' : 'Candidate submitted the exam', `${answered}/${BLUEPRINT.length} answered. Response digest ${digest.slice(0, 16)}…${paperInfo ? ` Paper fingerprint #${paperInfo.root.slice(0, 12)}.` : ''} Session report: ${report.lines.join(' ')}`, `Candidate app · ${id}`, id, { answered, responseDigest: digest, paperRoot: paperInfo?.root ?? null, reason, offlineSeconds: report.offlineSeconds, outages: report.outages, tabSwitches: report.tabSwitches, warnings: report.warnings }),
     ))
   }, [mutate]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -776,8 +790,44 @@ export function useExam() {
   const setFault = useCallback((fault: keyof ControlSlice['faults'], value: boolean) => {
     mutate((current) => withEvents(
       patchControl(current, { faults: { ...current.control.faults, [fault]: value } }),
-      event('incident', `Simulation: ${fault === 'wrongPaper' ? 'wrong paper version served' : 'answer-save channel disabled'} ${value ? 'ON' : 'OFF'}`, 'Operator-controlled pre-exam fault for readiness-gate testing.', 'Control Tower · simulation'),
+      event('incident', `Simulation: answer-save channel disabled ${value ? 'ON' : 'OFF'}`, 'Operator-controlled pre-exam fault for readiness-gate testing.', 'Control Tower · simulation'),
     ))
+  }, [mutate])
+
+  const setPaperTamper = useCallback((path: string) => {
+    mutate((current) => withEvents(
+      patchControl(current, { paperTamper: path }),
+      event('incident', path ? `Drill: paper altered in transit on ${path}` : 'Drill: paper tampering stopped', path ? 'The exam server now serves a copy of the paper with two options of T5 swapped to PCs on this path. Each PC must detect it against the authority-signed manifest and refuse entry.' : 'All paths receive the genuine paper again.', 'Control Tower · simulation'),
+    ))
+  }, [mutate])
+
+  const setCentreMode = useCallback((on: boolean) => {
+    mutate((current) => withEvents(
+      patchControl(current, { centreMode: on }),
+      event('approval', `Exam-centre mode ${on ? 'ON' : 'OFF'}`, on ? 'Camera is optional; an invigilator verifies each candidate at the seat before the timer can start.' : 'Remote-proctored mode: camera, face and fullscreen are required.', OFFICER),
+    ))
+  }, [mutate])
+
+  // ---------------- invigilator actions (seat-level, at the centre) ----------------
+
+  const verifyIdentity = useCallback((id: string, by: string) => {
+    mutate((current) => current.control.verified?.[id] ? current : withEvents(
+      patchControl(current, { verified: { ...current.control.verified, [id]: { at: now(), by } } }),
+      event('access', `Identity verified at the seat: ${id}`, `${by} matched the admit card and photo ID at ${seatLabel(rosterEntry(id))}.`, by, id, { action: 'identity-verified' }),
+    ))
+  }, [mutate])
+
+  const approveSeatMove = useCallback((id: string, by: string, reason: string) => {
+    mutate((current) => withEvents(
+      patchControl(current, { seatMoves: { ...current.control.seatMoves, [id]: now() } }),
+      event('approval', `Spare PC approved for ${id}`, `${reason} The candidate may sign in on a spare PC within 15 minutes; saved answers and timer carry over.`, by, id, { action: 'seat-move' }),
+    ))
+  }, [mutate])
+
+  // A seat-level problem the invigilator saw with their own eyes: corroborating evidence for the officer.
+  const invigilatorReport = useCallback((id: string, by: string, kind: 'pc-failure' | 'power-cut' | 'malpractice' | 'other', note: string) => {
+    const titles = { 'pc-failure': 'PC failure', 'power-cut': 'Power cut', malpractice: 'Suspected malpractice', other: 'Seat issue' }
+    mutate((current) => withEvents(current, event(kind === 'malpractice' ? 'integrity' : 'incident', `INVIGILATOR: ${titles[kind]} at ${seatLabel(rosterEntry(id))} (${id})`, note || 'Reported from the invigilator console.', by, id, { action: 'invigilator-report', report: kind, alert: true })))
   }, [mutate])
 
   const setPolicy = useCallback((patch: Partial<Pick<ControlSlice, 'thresholdSeconds' | 'graceSeconds'>>) => mutate((current) => patchControl(current, patch)), [mutate])
@@ -1119,7 +1169,7 @@ export function useExam() {
     state, me, mine, otherDevice, syncConnected, serverReachable,
     login, fetchCandidate, logout, acceptInstructions, recordGate, startExam, setLang, goTo, setMarked, updateResponse, saveAnswer, submit,
     recordSignal, addWarning, setAiStatus, reportMedia, requestAssisted, reportAffected, tabSwitch, acknowledge,
-    setWindow, grantReexam, rejectReexam, liftLock, cancelAttempt, resetCandidate, postMessage, saveRiskReport, setFault, setPolicy, injectOutage, restoreService, decide, approveAssisted, tamper, reset,
+    setWindow, grantReexam, rejectReexam, liftLock, cancelAttempt, resetCandidate, postMessage, saveRiskReport, setFault, setPaperTamper, setCentreMode, verifyIdentity, approveSeatMove, invigilatorReport, setPolicy, injectOutage, restoreService, decide, approveAssisted, tamper, reset,
   }
 }
 
