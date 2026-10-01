@@ -106,7 +106,7 @@ export type SignatureStatus = 'valid' | 'invalid' | 'unsigned' | 'unavailable'
 // ECDSA P-256 check of the exam server's signature over the receipt hash, done in this browser.
 export async function verifySignature(receipt: Receipt): Promise<SignatureStatus> {
   if (!receipt.serverSignature) return 'unsigned'
-  const server = await serverKey()
+  const server = await serverKey(receipt.keyId)
   if (!server) return 'unavailable'
   if (receipt.keyId !== server.keyId) return 'invalid'
   const signature = Uint8Array.from(atob(receipt.serverSignature), (char) => char.charCodeAt(0))

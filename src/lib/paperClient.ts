@@ -10,7 +10,15 @@ export const questionById = (id: string) => QUESTIONS.find((q) => q.id === id) ?
 export let paperInfo: { root: string; version: string; code: string; keyId: string } | null = null
 
 let publicKey: Promise<{ key: CryptoKey; keyId: string } | null> | undefined
-export const serverKey = () => (publicKey ??= fetch('/api/public-key')
+// `expect`: the key id a document claims. If it differs from the cached key, the server may have rotated
+// its key since this tab loaded (e.g. a redeploy), so fetch it once more before calling it unknown.
+export const serverKey = async (expect?: string) => {
+  const cached = await loadServerKey()
+  if (!expect || cached?.keyId === expect) return cached
+  publicKey = undefined
+  return loadServerKey()
+}
+const loadServerKey = () => (publicKey ??= fetch('/api/public-key', { cache: 'no-store' })
   .then((response) => response.json())
   .then(async (body) => ({ keyId: body.keyId as string, key: await crypto.subtle.importKey('jwk', body.jwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']) }))
   .catch(() => { publicKey = undefined; return null }))
@@ -26,7 +34,7 @@ interface Cached { manifest: string; signature: string; keyId: string; questions
 
 // Signature + per-question hashes. Used for fresh downloads and for the offline copy alike.
 async function verify(manifestText: string, signature: string, keyId: string, questions: Question[]): Promise<PaperResult> {
-  const server = await serverKey()
+  const server = await serverKey(keyId)
   if (!server) return { ok: false, reason: 'Could not fetch the exam authority public key.' }
   if (server.keyId !== keyId) return { ok: false, reason: `Paper signed by unknown key ${keyId}.` }
   const signed = await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, server.key, bytes(signature), new TextEncoder().encode(manifestText))
