@@ -192,6 +192,19 @@ The project follows the MPOnline challenge framing across the assessment lifecyc
 
 ## Technology
 
+<p align="center">
+  <img src="https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react&logoColor=0b1020" alt="React 18" />
+  <img src="https://img.shields.io/badge/TypeScript-5-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript 5" />
+  <img src="https://img.shields.io/badge/Vite-5-646CFF?style=for-the-badge&logo=vite&logoColor=FFD62E" alt="Vite 5" />
+  <img src="https://img.shields.io/badge/IndexedDB-Offline--first-00A98F?style=for-the-badge&logo=databricks&logoColor=white" alt="IndexedDB offline-first" />
+  <img src="https://img.shields.io/badge/WebSocket-Live%20relay-0F172A?style=for-the-badge&logo=socketdotio&logoColor=white" alt="WebSocket live relay" />
+  <img src="https://img.shields.io/badge/SHA--256-Evidence%20chain-EAB308?style=for-the-badge&logo=letsencrypt&logoColor=white" alt="SHA-256 evidence chain" />
+  <img src="https://img.shields.io/badge/Three.js-Visual%20hero-111827?style=for-the-badge&logo=threedotjs&logoColor=white" alt="Three.js" />
+  <img src="https://img.shields.io/badge/Claude-Review--only%20AI-D97757?style=for-the-badge&logo=anthropic&logoColor=white" alt="Claude review-only AI" />
+</p>
+
+<p align="center"><sub>A deliberate mix of resilient browser storage, real-time coordination, human-reviewed signals, and verifiable evidence.</sub></p>
+
 | Layer | Stack / approach |
 | --- | --- |
 | Client | React, TypeScript, and Vite |
@@ -253,6 +266,14 @@ The full demo roster is defined in `src/data/paper.ts`.
 
 ## Demo checklist
 
+<p align="center">
+  <img src="https://img.shields.io/badge/01-Start%20the%20candidate%20exam-2563EB?style=flat-square" alt="Step 1: candidate exam" />
+  <img src="https://img.shields.io/badge/02-Show%20the%20Readiness%20Gate-7C3AED?style=flat-square" alt="Step 2: Readiness Gate" />
+  <img src="https://img.shields.io/badge/03-Open%20Control%20Tower-0891B2?style=flat-square" alt="Step 3: Control Tower" />
+  <img src="https://img.shields.io/badge/04-Recover%20with%20evidence-16A34A?style=flat-square" alt="Step 4: recovery" />
+  <img src="https://img.shields.io/badge/05-Verify%20the%20receipt-EAB308?style=flat-square" alt="Step 5: receipt verification" />
+</p>
+
 1. Open `/exam` and sign in with a demo candidate.
 2. Walk through instructions and show the Readiness Gate before starting the paper.
 3. Save a few answers, then open `/ops` in another tab to show the live session.
@@ -278,6 +299,35 @@ npm run build
 | `src/lib/runner.ts` | JavaScript and Python coding-task runners. |
 | `server/proctor.ts` | Heartbeat and optional AI-proctor API. |
 | `vite.config.ts` | Dev server, relay, and HTTPS LAN mode. |
+
+## Contributors
+
+<p align="center">
+  <a href="https://github.com/shaunmortal">
+    <img src="https://avatars.githubusercontent.com/u/218578165?v=4" width="104" height="104" alt="Ayush Kumar" style="border-radius: 50%; border: 4px solid #2563eb;" /><br />
+    <sub><b>Ayush Kumar</b></sub>
+  </a>
+  &nbsp;&nbsp;&nbsp;
+  <a href="https://github.com/Cod4Nitish">
+    <img src="https://avatars.githubusercontent.com/u/181256622?v=4" width="104" height="104" alt="Nitish Singh" style="border-radius: 50%; border: 4px solid #7c3aed;" /><br />
+    <sub><b>Nitish Singh</b></sub>
+  </a>
+  &nbsp;&nbsp;&nbsp;
+  <a href="https://github.com/harsh-1-code">
+    <img src="https://avatars.githubusercontent.com/u/218582164?v=4" width="104" height="104" alt="Harsh Kumar" style="border-radius: 50%; border: 4px solid #16a34a;" /><br />
+    <sub><b>Harsh Kumar</b></sub>
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/shaunmortal"><img src="https://img.shields.io/badge/Ayush%20Kumar-Contributor-2563EB?style=flat-square&logo=github&logoColor=white" alt="Ayush Kumar, contributor" /></a>
+  <a href="https://github.com/Cod4Nitish"><img src="https://img.shields.io/badge/Nitish%20Singh-Contributor-7C3AED?style=flat-square&logo=github&logoColor=white" alt="Nitish Singh, contributor" /></a>
+  <a href="https://github.com/harsh-1-code"><img src="https://img.shields.io/badge/Harsh%20Kumar-Contributor-16A34A?style=flat-square&logo=github&logoColor=white" alt="Harsh Kumar, contributor" /></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/shaunmortal/online-assessment/graphs/contributors"><img src="https://img.shields.io/badge/Open%20source%20team-3%20contributors-F97316?style=for-the-badge&logo=github&logoColor=white" alt="Three contributors" /></a>
+</p>
 
 ## Honest boundaries
 
