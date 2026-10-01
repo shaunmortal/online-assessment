@@ -145,7 +145,7 @@ export function ReceiptModal({ receipt, state, onClose }: { receipt: Receipt; st
           <div><dt>Incident</dt><dd>{receipt.incidentId}</dd></div>
           <div><dt>Affected interval</dt><dd>{fmtTime(receipt.interval.from)} → {fmtTime(receipt.interval.to)}<small>{receipt.interval.seconds}s measured</small></dd></div>
           <div><dt>Answers preserved</dt><dd>{receipt.answersPreserved}<small>{receipt.checkpointsPreserved} checkpoints</small></dd></div>
-          <div><dt>Remedy</dt><dd>{policyLabel[receipt.policy]}<small>{receipt.policy === 'reschedule' ? 'Attempt closed; new slot to follow' : `Timer paused during the interval${receipt.creditSeconds ? ` + ${receipt.creditSeconds}s extra` : ''}`}</small></dd></div>
+          <div><dt>Remedy</dt><dd>{policyLabel[receipt.policy]}<small>{receipt.policy === 'reschedule' ? 'Re-exam in a new slot' : receipt.creditSeconds ? `+${receipt.creditSeconds}s added to your timer` : 'Kept answering offline — no time lost'}</small></dd></div>
           <div><dt>Decided by</dt><dd>{receipt.officer}<small>{fmtTime(receipt.decidedAt)}</small></dd></div>
         </dl>
         <p className="reason"><b>Decision reason:</b> {receipt.reason}</p>

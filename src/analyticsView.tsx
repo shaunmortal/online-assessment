@@ -266,7 +266,7 @@ export function AnalyticsPanel({ api }: { api: ExamApi }) {
           <thead><tr><th>Centre / path</th><th>Signed in</th><th>Started</th><th>Drops</th><th>Offline min</th><th>Incidents</th><th>Integrity</th><th>AI flags</th><th>Reliability</th></tr></thead>
           <tbody>{stats.centres.map((row) => (
             <tr key={row.path}><td><b>{row.centre}</b><small>{row.path}</small></td><td>{row.candidates}</td><td>{row.started}</td><td>{row.drops}</td><td>{row.offlineMinutes}</td><td>{row.incidents}</td><td>{row.integrity}</td><td>{row.aiFlags}</td>
-              <td><span className="bar"><i style={{ width: `${row.reliability}%` }} className={row.reliability < 60 ? 'bad' : row.reliability < 85 ? 'warn' : 'good'} /></span> {row.reliability}</td></tr>
+              <td><span className="rel-bar"><i style={{ width: `${row.reliability}%` }} className={row.reliability < 60 ? 'bad' : row.reliability < 85 ? 'warn' : 'good'} /></span> {row.reliability}</td></tr>
           ))}</tbody>
         </table>
       </div>

@@ -508,11 +508,11 @@ input[type=checkbox], input[type=radio] { accent-color: var(--ink); }
 .decision-banner.reconduct-cohort { background: var(--bad-soft); border-color: #f1c4be; }
 .decision-banner ul { margin: 6px 0; padding-left: 18px; font-size: 13px; color: var(--ink-2); }
 #analytics h3 { margin: 20px 0 8px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
-.bar { display: inline-block; width: 70px; height: 6px; border-radius: 3px; background: var(--line); vertical-align: middle; overflow: hidden; margin-right: 6px; }
-.bar i { display: block; height: 100%; }
-.bar i.good { background: var(--good); }
-.bar i.warn { background: var(--warn); }
-.bar i.bad { background: var(--bad); }
+.rel-bar { display: inline-block; width: 70px; height: 6px; border-radius: 3px; background: var(--line); vertical-align: middle; overflow: hidden; margin-right: 6px; }
+.rel-bar i { display: block; height: 100%; }
+.rel-bar i.good { background: var(--good); }
+.rel-bar i.warn { background: var(--warn); }
+.rel-bar i.bad { background: var(--bad); }
 .copilot { margin-bottom: 6px; }
 .copilot-answer { display: grid; gap: 6px; padding: 12px; border: 1px solid #c9d3f0; border-radius: 8px; background: var(--accent-soft); font-size: 13px; }
 .copilot-answer p { margin: 0; color: var(--ink); }
