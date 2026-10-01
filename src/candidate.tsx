@@ -38,7 +38,9 @@ export function CandidateApp({ api }: { api: ExamApi }) {
   if (api.otherDevice) return <OtherDevice api={api} />
 
   // Could not take the exam: reported, disconnected when the window closed, or never got past the gate.
-  if (api.mine && (api.mine.report || (windowClosed && (phase === 'instructions' || phase === 'gate')))) return <Affected api={api} />
+  // ...or released by an officer with a re-exam before starting (e.g. a tampered paper at the centre).
+  const released = api.mine && !api.mine.startedAt && api.state.control.reexams?.[api.mine.candidateId]?.status === 'granted'
+  if (api.mine && (api.mine.report || released || (windowClosed && (phase === 'instructions' || phase === 'gate')))) return <Affected api={api} />
 
   switch (phase) {
     case 'login': return <Login api={api} integrity={integrity} />
@@ -274,6 +276,7 @@ function Gate({ api, integrity }: { api: ExamApi; integrity: Integrity }) {
   const [running, setRunning] = useState(false)
   const lastOutcome = useRef('')
   const reportedTamper = useRef('')
+  const [tamper, setTamper] = useState<{ reason: string; at: string } | null>(null)
   const faults = state.control.faults
   const assistedApproved = Boolean(state.control.assistedApproved[mine.candidateId])
 
@@ -281,6 +284,7 @@ function Gate({ api, integrity }: { api: ExamApi; integrity: Integrity }) {
     setRunning(true)
     const { checks: results, tampered } = await runPlatformChecks(api.state, mine.candidateId, mine.lang)
     setChecks(results)
+    setTamper((previous) => (tampered ? previous ?? { reason: tampered, at: new Date().toISOString() } : null))
     if (tampered && reportedTamper.current !== tampered) {
       reportedTamper.current = tampered
       const entry = rosterEntry(mine.candidateId)
@@ -335,11 +339,18 @@ function Gate({ api, integrity }: { api: ExamApi; integrity: Integrity }) {
             ))}
             {!checks.length && <li><Loader2 size={16} className="spin" /> Running checks…</li>}
           </ul>
-          {!platformOk && checks.length > 0 && <p className="error-text"><AlertTriangle size={14} /> Entry is blocked because a platform check failed. This is not your fault — your exam time has not started. Retrying every 10 seconds{blockedFor ? ` (blocked for ${fmtClock(blockedFor)})` : ''}.</p>}
+          {tamper && (
+            <div className="tamper-box" role="alert">
+              <b><ShieldAlert size={16} /> The question paper for your centre failed the security check</b>
+              <p>It was <b>not shown to you</b>, and the exam office was alerted automatically at {fmtTime(tamper.at)}. <b>Your {EXAM_SECONDS / 60} minutes have not started</b> — you get the full time once a verified paper arrives (this page checks every 10 seconds).</p>
+              <p>If it cannot be fixed, the exam officer will release you with a re-exam; at the latest you can report it when the window closes at {fmtTime(new Date(windowEndsAt(state)).toISOString())}. Please stay seated and follow the invigilator.</p>
+            </div>
+          )}
+          {!platformOk && checks.length > 0 && !tamper && <p className="error-text"><AlertTriangle size={14} /> Entry is blocked because a platform check failed. This is not your fault — your exam time has not started. Retrying every 10 seconds{blockedFor ? ` (blocked for ${fmtClock(blockedFor)})` : ''}.</p>}
           {blockedFor >= 120 && (
             <div className="report-box">
               <p className="muted small">Still unable to start after 2 minutes. If the problem continues, report it — the report is saved on this device and reaches the exam office as soon as a connection is available. If the platform's records confirm it, you will get a re-exam.</p>
-              <button className="btn primary wide" onClick={() => api.reportAffected('I could not start the exam: the system check kept failing (no connection to the exam server).')}><AlertTriangle size={16} /> Report — I cannot take this exam</button>
+              <button className="btn primary wide" onClick={() => api.reportAffected(tamper ? 'I could not start the exam: the question paper at my centre failed the security check.' : 'I could not start the exam: the system check kept failing (no connection to the exam server).')}><AlertTriangle size={16} /> Report — I cannot take this exam</button>
             </div>
           )}
         </div>
@@ -952,8 +963,10 @@ function Affected({ api }: { api: ExamApi }) {
   const entry = rosterEntry(candidate.candidateId)
   const reexam = state.control.reexams?.[candidate.candidateId]
   const [receipt, setReceipt] = useState<Receipt | null>(null)
+  const tampered = state.audit.some((item) => item.candidateId === candidate.candidateId && item.data?.action === 'paper-tampered')
   const [reason, setReason] = useState(candidate.startedAt
     ? 'My connection to the exam server was lost and did not come back before the exam window closed.'
+    : tampered ? 'I could not start the exam because the question paper at my centre failed the security check.'
     : 'I could not start the exam because the system check kept failing (no connection to the exam server).')
   const answered = Object.values(candidate.responses).filter((response) => response.answer !== undefined).length
   const title = reexam?.status === 'granted' ? 'Re-exam granted — only for you'
@@ -966,7 +979,7 @@ function Affected({ api }: { api: ExamApi }) {
       <section className="doc-card affected">
         {reexam?.status === 'granted' ? <BadgeCheck size={40} className="good-icon" /> : <WifiOff size={40} className="warn-icon" />}
         <h1>{title}</h1>
-        {!candidate.report && (
+        {!candidate.report && !reexam && (
           <p className="muted">You could not take this exam because your session was disconnected{candidate.startedAt ? '' : ' before it could start'}, and the exam window closed at {fmtTime(new Date(windowEndsAt(state)).toISOString())}. The paper stays locked for this attempt. {answered ? `${answered} answer(s) you saved before the interruption are preserved.` : ''}</p>
         )}
         {candidate.report && !reexam && (
@@ -982,7 +995,7 @@ function Affected({ api }: { api: ExamApi }) {
           </>
         )}
         {reexam?.status === 'rejected' && <p className="muted">{reexam.officer}: {reexam.reason}</p>}
-        {!candidate.report && (
+        {!candidate.report && !reexam && (
           <div className="report-box">
             <label>What happened?<textarea rows={3} value={reason} onChange={(e) => setReason(e.target.value)} /></label>
             <button className="btn primary wide" disabled={!reason.trim()} onClick={() => api.reportAffected(reason.trim())}><AlertTriangle size={16} /> Report — I could not take this exam</button>

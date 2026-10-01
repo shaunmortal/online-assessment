@@ -109,6 +109,12 @@ export function OpsApp({ api }: { api: ExamApi }) {
                   {typeof item.data?.tabSwitch === 'number' && lock !== 'none' && !cancelled && <button className="btn small" onClick={() => api.liftLock(id)}>Resume candidate</button>}
                   {typeof item.data?.tabSwitch === 'number' && lock === 'suspended' && !cancelled && <button className="btn small danger" onClick={() => api.cancelAttempt(id)}>Cancel attempt</button>}
                   {cancelled && <Pill tone="bad">Cancelled</Pill>}
+                  {item.data?.action === 'paper-tampered' && (state.control.paperTamper && state.control.paperTamper === item.data.path
+                    ? <button className="btn small" onClick={() => api.setPaperTamper('')}>Re-issue clean paper</button>
+                    : <Pill tone="good">Clean paper re-issued</Pill>)}
+                  {item.data?.action === 'paper-tampered' && !state.candidates[id]?.startedAt && (state.control.reexams?.[id]
+                    ? <Pill tone="info">Re-exam granted</Pill>
+                    : <button className="btn small danger" onClick={() => api.rescheduleTampered(String(item.data?.path))}>Release centre with re-exam</button>)}
                   <button className="icon-btn" aria-label="Dismiss alert" onClick={() => setDismissed((list) => [...list, item.id])}>✕</button>
                 </div>
               )

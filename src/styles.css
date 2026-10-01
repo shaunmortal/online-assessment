@@ -552,3 +552,6 @@ input[type=checkbox], input[type=radio] { accent-color: var(--ink); }
 .seat form input { flex: 1; }
 @media (max-width: 720px) { .seat-grid { grid-template-columns: 1fr !important; } .seat-grid > div { grid-row: auto !important; grid-column: auto !important; } }
 .callout svg { vertical-align: -2px; margin-right: 6px; }
+.tamper-box { display: grid; gap: 6px; margin-top: 14px; padding: 14px 16px; border-radius: 10px; background: var(--bad-soft); border: 1px solid #f1c4be; color: var(--ink); font-size: 13.5px; line-height: 1.55; }
+.tamper-box > b { display: flex; gap: 8px; align-items: center; color: var(--bad); font-size: 14px; }
+.tamper-box p { margin: 0; }

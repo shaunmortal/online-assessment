@@ -69,6 +69,8 @@ export function reexamEvidence(state: ExamState, id: string, strong = false) {
   const evidence: string[] = []
   const blocks = state.audit.filter((item) => item.candidateId === id && item.kind === 'release' && item.data?.passed === false).length
   if (!slice.startedAt && blocks) evidence.push(`readiness gate blocked ${blocks} time(s); the exam never started`)
+  const tampered = state.audit.filter((item) => item.candidateId === id && item.data?.action === 'paper-tampered')
+  if (!slice.startedAt && tampered.length) evidence.push(`the paper delivered to this PC failed the authority signature check at ${new Date(tampered[0].at).toLocaleTimeString('en-IN', { hour12: false })}; the candidate was never shown it`)
   const silent = state.control.incidents.filter((item) => item.detected && item.affected.includes(id) && !slice.outages.some((o) => (o.to ?? '9') > item.startedAt && o.from < (item.restoredAt ?? '9')))
   const silentSeconds = silent.reduce((total, item) => total + secondsBetween(item.startedAt, item.restoredAt ?? now()), 0)
   if (silentSeconds >= state.control.thresholdSeconds) evidence.push(`device was silent for ${silentSeconds}s (crash, power or closed tab), longer than the ${state.control.thresholdSeconds}s threshold`)
@@ -1004,10 +1006,12 @@ export function useExam() {
   }, [mutate])
 
   // Re-exam for exactly one candidate, with a sealed receipt. Nobody else is affected.
-  const grantReexam = useCallback(async (id: string, auto: boolean, reason: string, officer: string) => {
+  // Normally answers a candidate's report; `officerInitiated` lets an officer release candidates who are
+  // still waiting at the gate (e.g. a tampered paper at their centre) without making them report first.
+  const grantReexam = useCallback(async (id: string, auto: boolean, reason: string, officer: string, officerInitiated = false) => {
     const current = stateRef.current
     const slice = current.candidates[id]
-    if (!slice?.report || current.control.reexams?.[id]) return
+    if (!slice || (!slice.report && !officerInitiated) || current.control.reexams?.[id]) return
     const evidence = reexamEvidence(current, id)
     const at = now()
     const approval = event('approval', `Re-exam granted to ${id} only`, `${reason} Evidence: ${evidence.join('; ') || 'officer review'}. No other candidate is affected; no marks changed.`, auto ? 'Cohort Remedy Engine · evidence-backed auto-grant' : officer, id, { reexam: true, auto })
@@ -1020,8 +1024,8 @@ export function useExam() {
       candidateId: id,
       candidateName: rosterEntry(id)?.name ?? id,
       incidentId: incident?.id ?? `RE-${id.replace('EXM-', '')}`,
-      interval: { from: firstLoss, to: slice.report.at, seconds: secondsBetween(firstLoss, slice.report.at) },
-      answersPreserved: slice.report.answered,
+      interval: { from: firstLoss, to: slice.report?.at ?? at, seconds: secondsBetween(firstLoss, slice.report?.at ?? at) },
+      answersPreserved: slice.report?.answered ?? Object.values(slice.responses).filter((response) => response.answer !== undefined).length,
       checkpointsPreserved: current.checkpoints.filter((checkpoint) => checkpoint.candidateId === id).length,
       policy: 'reschedule',
       creditSeconds: 0,
@@ -1046,6 +1050,15 @@ export function useExam() {
       return current?.receipt?.hash === receipt.hash && !current.receipt.serverSignature ? patchControl(latest, { reexams: { ...latest.control.reexams, [id]: { ...current, receipt: { ...current.receipt, ...signature } } } }) : latest
     }))
   }, [mutate])
+
+  // Candidates on this path who were blocked by a tampered paper and never started: release them now.
+  const rescheduleTampered = useCallback((path: string) => {
+    const current = stateRef.current
+    const blocked = Object.values(current.candidates).filter((slice) => rosterEntry(slice.candidateId)?.path === path && !slice.startedAt && !current.control.reexams?.[slice.candidateId]
+      && current.audit.some((item) => item.candidateId === slice.candidateId && item.data?.action === 'paper-tampered'))
+    for (const slice of blocked) void grantReexam(slice.candidateId, false, 'The question paper delivered to this centre failed the authority signature check, so the candidate was never shown it. Released from the centre with a fresh slot.', OFFICER, true)
+    return blocked.length
+  }, [grantReexam])
 
   const rejectReexam = useCallback((id: string, reason: string, officer: string) => {
     mutate((current) => !current.candidates[id]?.report || current.control.reexams?.[id] ? current : withEvents(
@@ -1177,7 +1190,7 @@ export function useExam() {
     state, me, mine, otherDevice, syncConnected, serverReachable,
     login, fetchCandidate, logout, acceptInstructions, recordGate, startExam, setLang, goTo, setMarked, updateResponse, saveAnswer, submit,
     recordSignal, addWarning, setAiStatus, reportMedia, requestAssisted, reportAffected, tabSwitch, acknowledge,
-    setWindow, grantReexam, rejectReexam, liftLock, cancelAttempt, resetCandidate, postMessage, saveRiskReport, setFault, setPaperTamper, setCentreMode, verifyIdentity, approveSeatMove, invigilatorReport, setPolicy, injectOutage, restoreService, decide, approveAssisted, tamper, reset,
+    setWindow, grantReexam, rejectReexam, liftLock, cancelAttempt, resetCandidate, postMessage, saveRiskReport, setFault, setPaperTamper, rescheduleTampered, setCentreMode, verifyIdentity, approveSeatMove, invigilatorReport, setPolicy, injectOutage, restoreService, decide, approveAssisted, tamper, reset,
   }
 }
 
