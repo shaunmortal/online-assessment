@@ -275,6 +275,12 @@ export function attachPlatform(httpServer: Server | null | undefined, use: (hand
     return response.parsed_output as z.infer<T>
   }
 
+  // Face-detector wasm/model: a CDN that recompresses on the fly (Render's Cloudflare brotli) turned an
+  // 11 MB download into ~60 s. no-transform disables that; a day of caching makes repeat visits instant.
+  use((req, res, next) => {
+    if (/^\/(mediapipe|models)\//.test(req.url ?? '')) res.setHeader('Cache-Control', 'public, max-age=86400, no-transform')
+    next()
+  })
   use(createProctorHandler(apiKey, intervalSeconds))
   use(async (req, res, next) => {
     const path = new URL(req.url ?? '/', 'http://localhost').pathname
