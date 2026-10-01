@@ -22,7 +22,7 @@ export function deviceRisk(slice: CandidateSlice, at = Date.now()): Risk {
     score += 25
     reasons.push(`heartbeat latency ${t.rttMs} ms vs ${t.baselineRttMs} ms baseline`)
   } else if (t && t.rttMs >= 800) {
-    score += 20
+    score += 25
     reasons.push(`heartbeat latency ${t.rttMs} ms`)
   }
   if (t && t.jitterMs >= 250) {

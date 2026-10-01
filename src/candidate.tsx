@@ -54,12 +54,17 @@ function Login({ api, integrity }: { api: ExamApi; integrity: Integrity }) {
   const [id, setId] = useState('')
   const [dob, setDob] = useState('')
   const [error, setError] = useState('')
-  const submit = (event: FormEvent) => {
+  const [busy, setBusy] = useState(false)
+  const submit = async (event: FormEvent) => {
     event.preventDefault()
+    // Fullscreen needs the click gesture, so request it before awaiting the server.
+    if (!document.fullscreenElement && rosterEntry(id.trim().toUpperCase())?.dob === dob.replace(/\D/g, '')) void integrity.requestFullscreen()
+    setBusy(true)
+    await api.fetchCandidate(id, dob)
+    setBusy(false)
     const failed = api.login(id, dob)
     setError(failed ?? '')
-    // The sign-in click is the user gesture browsers require for fullscreen. Camera comes after the rules.
-    if (!failed && !document.fullscreenElement) void integrity.requestFullscreen()
+
   }
   return (
     <main className="login-page">
@@ -81,11 +86,11 @@ function Login({ api, integrity }: { api: ExamApi; integrity: Integrity }) {
         <p className="eyebrow">Candidate sign-in</p>
         <h2>Welcome</h2>
         <p className="muted">Use the Candidate ID and date of birth printed on your admit card.</p>
-        <form onSubmit={submit}>
+        <form onSubmit={(event) => void submit(event)}>
           <label>Candidate ID<input value={id} onChange={(e) => setId(e.target.value)} placeholder="EXM-20841" autoComplete="username" required /></label>
           <label>Date of birth (DDMMYYYY)<input value={dob} onChange={(e) => setDob(e.target.value)} placeholder="14082004" inputMode="numeric" type="password" autoComplete="current-password" required /></label>
           {error && <p className="error-text" role="alert">{error}</p>}
-          <button className="btn primary wide" type="submit">Sign in</button>
+          <button className="btn primary wide" type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
         </form>
         <details className="demo-creds">
           <summary>Demo credentials</summary>

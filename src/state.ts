@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  apiReachable, classifyLosses, createState, offlineSeconds, TAB_LOCK_MINUTES, isExamState, lostInterval, mergeState, newCandidate, now, openIncidents, receiptBody,
+  StateStore, isPatch, patchOf, type StatePatch, apiReachable, classifyLosses, createState, offlineSeconds, TAB_LOCK_MINUTES, isExamState, lostInterval, mergeState, newCandidate, now, openIncidents, receiptBody,
   recommend, remainingSeconds, REORIENTATION_BUFFER, sealEvents, secondsBetween, sha256, shortId, verifyChain,
   type AuditEvent, type AuditKind, type CandidateSlice, type Checkpoint, type ControlSlice, type ExamState, type FaultKind,
   type Incident, type Lang, type Message, type Policy, type Receipt, type ResponseState,
@@ -265,36 +265,99 @@ export function useExam() {
   const clientId = useRef(shortId('client')).current
   meRef.current = me
 
-  const persist = useCallback((next: ExamState) => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
-    } catch {
-      // IndexedDB below is the durable copy.
-    }
-    void saveSnapshot(next).catch(() => undefined)
+  // ---- sync: BroadcastChannel/localStorage/IndexedDB carry full snapshots on this machine;
+  // the relay carries deltas only (what it doesn't know yet), merged in O(changes) by a StateStore.
+  const storeRef = useRef<StateStore | null>(null)
+  if (!storeRef.current) {
+    storeRef.current = new StateStore()
+    storeRef.current.apply(patchOf(state))
+  }
+  const known = useRef(new WeakSet<object>()) // objects the relay already has
+  const knownSession = useRef('')
+  const flushTimer = useRef<number | undefined>(undefined)
+  const persistTimer = useRef<number | undefined>(undefined)
+
+  const persist = useCallback(() => {
+    if (persistTimer.current) return
+    persistTimer.current = window.setTimeout(() => {
+      persistTimer.current = undefined
+      const snapshot = stateRef.current
+      try {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot))
+      } catch {
+        // IndexedDB below is the durable copy.
+      }
+      void saveSnapshot(snapshot).catch(() => undefined)
+    }, 800)
   }, [])
+
+  // Pending relay patches are folded into stateRef before any local change is computed.
+  const flush = useCallback(() => {
+    if (flushTimer.current === undefined) return
+    window.clearTimeout(flushTimer.current)
+    flushTimer.current = undefined
+    const snapshot = storeRef.current!.snapshot()
+    if (!snapshot) return
+    stateRef.current = snapshot
+    setState(snapshot)
+    persist()
+  }, [persist])
+
+  const scheduleFlush = useCallback(() => {
+    if (flushTimer.current !== undefined) return
+    flushTimer.current = window.setTimeout(() => { flushTimer.current = -1; flush() }, 120)
+  }, [flush])
+
+  const remember = (patch: StatePatch) => {
+    if (patch.full) knownSession.current = patch.sessionId
+    for (const item of [...Object.values(patch.candidates ?? {}), ...(patch.control ? [patch.control] : []), ...(patch.audit ?? []), ...(patch.checkpoints ?? [])]) known.current.add(item)
+  }
+
+  // Everything in `next` the relay has not seen yet.
+  const diff = (next: ExamState): StatePatch | null => {
+    if (knownSession.current !== next.sessionId) return patchOf(next)
+    const patch: StatePatch = { sessionId: next.sessionId, createdAt: next.createdAt, epoch: next.epoch }
+    const candidates = Object.entries(next.candidates).filter(([, slice]) => !known.current.has(slice))
+    if (candidates.length) patch.candidates = Object.fromEntries(candidates)
+    if (!known.current.has(next.control)) patch.control = next.control
+    const audit = next.audit.filter((event) => !known.current.has(event))
+    if (audit.length) patch.audit = audit
+    const checkpoints = next.checkpoints.filter((checkpoint) => !known.current.has(checkpoint))
+    if (checkpoints.length) patch.checkpoints = checkpoints
+    return patch.candidates || patch.control || patch.audit || patch.checkpoints ? patch : null
+  }
+
+  const role = window.location.pathname.startsWith('/exam') ? 'candidate' : window.location.pathname.startsWith('/ops') ? 'ops' : 'viewer'
+  const sendRelay = (envelope: Record<string, unknown>) => {
+    if (relayRef.current?.readyState === WebSocket.OPEN) relayRef.current.send(JSON.stringify({ source: clientId, role, me: meRef.current ?? undefined, ...envelope }))
+  }
 
   const write = useCallback((next: ExamState) => {
     stateRef.current = next
     setState(next)
-    persist(next)
+    persist()
     channelRef.current?.postMessage(next)
-    if (relayRef.current?.readyState === WebSocket.OPEN) relayRef.current.send(JSON.stringify({ source: clientId, state: next }))
-  }, [clientId, persist])
+    const patch = diff(next)
+    if (!patch) return
+    storeRef.current!.apply(patch)
+    if (relayRef.current?.readyState === WebSocket.OPEN) {
+      sendRelay({ patch })
+      remember(patch)
+    }
+  }, [clientId, persist]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Full snapshots from this machine (other tabs, storage, IndexedDB).
   const apply = useCallback((incoming: unknown) => {
     if (!isExamState(incoming)) return
-    const merged = mergeState(stateRef.current, incoming)
-    stateRef.current = merged
-    setState(merged)
-    persist(merged)
-  }, [persist])
+    if (storeRef.current!.apply(patchOf(incoming))) scheduleFlush()
+  }, [scheduleFlush])
 
   const mutate = useCallback((recipe: (current: ExamState) => ExamState) => {
+    flush()
     const current = stateRef.current
     const next = recipe(current)
     if (next !== current) write(next)
-  }, [write])
+  }, [write, flush])
 
   useEffect(() => {
     const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel(CHANNEL) : null
@@ -326,12 +389,18 @@ export function useExam() {
       socket.onopen = () => {
         if (!alive) return
         setSyncConnected(true)
-        socket.send(JSON.stringify({ source: clientId, state: stateRef.current }))
+        flush()
+        const full = patchOf(stateRef.current)
+        sendRelay({ patch: full }) // after a reconnect, upload everything once (offline answers included)
+        known.current = new WeakSet()
+        remember(full)
       }
       socket.onmessage = (message) => {
         try {
-          const envelope = JSON.parse(String(message.data)) as { source?: string; state?: unknown }
-          if (envelope.source !== clientId) apply(envelope.state)
+          const envelope = JSON.parse(String(message.data)) as { source?: string; patch?: unknown }
+          if (envelope.source === clientId || !isPatch(envelope.patch)) return
+          remember(envelope.patch)
+          if (storeRef.current!.apply(envelope.patch)) scheduleFlush()
         } catch {
           // ignore malformed relay frames
         }
@@ -354,19 +423,29 @@ export function useExam() {
       }
       relayRef.current = null
     }
-  }, [apply, clientId])
+  }, [apply, clientId, flush, scheduleFlush]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Seal every new event with its SHA-256 digest (any tab may do it; the digest is deterministic).
+  // Tell the relay which candidate this tab is, so it routes that candidate's updates here.
+  useEffect(() => { sendRelay({}) }, [me]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Seal new events with their SHA-256 digest. Each tab seals what it created (candidate tabs their own
+  // events, the Control Tower everything else); anything left unsealed for 10 s is sealed by whoever sees it.
   useEffect(() => {
-    if (state.audit.every((item) => item.digest)) return
+    const mine = (event: AuditEvent) => {
+      if (Date.now() - Date.parse(event.at) > 10_000) return true
+      const fromCandidate = event.source.startsWith('Candidate') || event.source.startsWith('AI proctor')
+      return role === 'candidate' ? fromCandidate && event.candidateId === meRef.current : !fromCandidate
+    }
+    const pending = state.audit.filter((item) => !item.digest && mine(item))
+    if (!pending.length) return
     let cancelled = false
-    void sealEvents(state.audit.filter((item) => !item.digest)).then((sealed) => {
+    void sealEvents(pending).then((sealed) => {
       if (cancelled) return
       const byId = new Map(sealed.map((item) => [item.id, item]))
       mutate((current) => ({ ...current, audit: current.audit.map((item) => (item.digest ? item : byId.get(item.id) ?? item)) }))
     })
     return () => { cancelled = true }
-  }, [state.audit, mutate])
+  }, [state.audit, mutate]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const mine = state.candidates[me ?? ''] as CandidateSlice | undefined
   const myId = () => meRef.current ?? ''
@@ -386,7 +465,8 @@ export function useExam() {
       const existing = current.candidates[entry.id]
       const resumed = Boolean(existing && existing.phase !== 'login')
       const takeover = Boolean(resumed && existing!.deviceId && existing!.deviceId !== deviceId && (existing!.phase === 'exam' || existing!.phase === 'gate'))
-      const slice = resumed ? { ...existing!, device, deviceId, updatedAt: now(), rev: (existing!.rev ?? 0) + 1 } : { ...newCandidate(entry.id, QUESTIONS[0].id, device), deviceId, rev: (existing?.rev ?? 0) + 1 }
+      const claim = { device, deviceId, deviceClaimAt: now() }
+      const slice = resumed ? { ...existing!, ...claim, updatedAt: now(), rev: (existing!.rev ?? 0) + 1 } : { ...newCandidate(entry.id, QUESTIONS[0].id, device), ...claim, rev: (existing?.rev ?? 0) + 1 }
       return withEvents(
         { ...current, candidates: { ...current.candidates, [entry.id]: slice } },
         ...(takeover ? [event('integrity', `SECOND DEVICE — ${entry.id} signed in on another device`, `The attempt moved to ${device}; the previous device was signed out automatically. Review whether this was a genuine device change.`, `Candidate app · ${entry.id}`, entry.id, { alert: true, action: 'device-takeover' })] : []),
@@ -395,6 +475,22 @@ export function useExam() {
     })
     return undefined
   }, [mutate])
+
+  // Pull this candidate's saved attempt from the exam server before signing in (resume on any PC).
+  const fetchCandidate = useCallback(async (id: string, dob: string) => {
+    try {
+      const response = await fetch('/api/candidate-state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, dob }) })
+      if (!response.ok) return
+      const { patch } = await response.json()
+      if (isPatch(patch) && storeRef.current!.apply(patch)) {
+        remember(patch)
+        flushTimer.current = -1
+        flush()
+      }
+    } catch {
+      // offline sign-in still works from this device's own copy
+    }
+  }, [flush]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const logout = useCallback(() => {
     window.sessionStorage.removeItem(ME_KEY)
@@ -604,7 +700,7 @@ export function useExam() {
         if (httpOk) {
           const rtt = performance.now() - sentAt
           rttSamples.current = [...rttSamples.current.slice(-9), rtt]
-          if (rttBaseline.current.length < 10) rttBaseline.current.push(rtt)
+          rttBaseline.current = [...rttBaseline.current, rtt].sort((x, y) => x - y).slice(0, 10) // best latencies seen = healthy baseline
         }
       } catch {
         httpOk = false
@@ -794,7 +890,8 @@ export function useExam() {
     }))
   }, [mutate])
 
-  const reset = useCallback(() => write(createState((stateRef.current.epoch ?? 0) + 1)), [write])
+  // Epoch = wall-clock ms, so a reset wins even if this tab has not synced the latest session yet.
+  const reset = useCallback(() => write(createState(Math.max(Date.now(), (stateRef.current.epoch ?? 0) + 1))), [write])
 
   // Officer resets one candidate so they can sign in and take the exam again (evidence of the old attempt stays).
   // Officer announcements to all PCs, one service path, or one candidate.
@@ -1019,7 +1116,7 @@ export function useExam() {
 
   return {
     state, me, mine, otherDevice, syncConnected, serverReachable,
-    login, logout, acceptInstructions, recordGate, startExam, setLang, goTo, setMarked, updateResponse, saveAnswer, submit,
+    login, fetchCandidate, logout, acceptInstructions, recordGate, startExam, setLang, goTo, setMarked, updateResponse, saveAnswer, submit,
     recordSignal, addWarning, setAiStatus, reportMedia, requestAssisted, reportAffected, tabSwitch, acknowledge,
     setWindow, grantReexam, rejectReexam, liftLock, cancelAttempt, resetCandidate, postMessage, saveRiskReport, setFault, setPolicy, injectOutage, restoreService, decide, approveAssisted, tamper, reset,
   }

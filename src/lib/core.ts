@@ -65,6 +65,7 @@ export interface CandidateSlice {
   tabSwitches?: number
   telemetry?: Telemetry // device + network health reported every ~10 s (feeds early-warning prediction)
   deviceId?: string // the one browser allowed to run this attempt; signing in elsewhere takes over
+  deviceClaimAt?: string // when deviceId was claimed: the latest claim wins regardless of slice revision
   lockedAt?: string // 2nd tab switch: paper locked until lockedUntil (timer keeps running)
   lockedUntil?: string
   suspendedAt?: string // 3rd tab switch: paper locked until an officer resumes or cancels
@@ -300,6 +301,13 @@ const preferCheckpoint = (a: Checkpoint, b: Checkpoint) => (a.reconciledAt && !b
 const newer = <T extends { updatedAt: string; rev?: number }>(a: T, b: T) =>
   (b.rev ?? 0) !== (a.rev ?? 0) ? ((b.rev ?? 0) > (a.rev ?? 0) ? b : a) : b.updatedAt >= a.updatedAt ? b : a
 
+// The old PC keeps bumping its revision with heartbeats, so device ownership merges on claim time instead.
+const newerSlice = (a: CandidateSlice, b: CandidateSlice): CandidateSlice => {
+  const chosen = newer(a, b)
+  const other = chosen === a ? b : a
+  return (other.deviceClaimAt ?? '') > (chosen.deviceClaimAt ?? '') ? { ...chosen, deviceId: other.deviceId, deviceClaimAt: other.deviceClaimAt, device: other.device } : chosen
+}
+
 // Candidate tab owns `candidate`, Control Tower owns `control`; logs merge by id.
 export function mergeState(a: ExamState, b: ExamState): ExamState {
   if (a.sessionId !== b.sessionId) {
@@ -310,7 +318,7 @@ export function mergeState(a: ExamState, b: ExamState): ExamState {
     return b.createdAt < a.createdAt || (b.createdAt === a.createdAt && b.sessionId < a.sessionId) ? b : a
   }
   const candidates = { ...a.candidates }
-  for (const [id, slice] of Object.entries(b.candidates)) candidates[id] = candidates[id] ? newer(candidates[id], slice) : slice
+  for (const [id, slice] of Object.entries(b.candidates)) candidates[id] = candidates[id] ? newerSlice(candidates[id], slice) : slice
   const control = newer(a.control, b.control)
   // A per-candidate reset wins over any device still holding the old attempt.
   for (const [id, at] of Object.entries(control.resets ?? {})) if (candidates[id] && candidates[id].loggedInAt <= at) delete candidates[id]
@@ -320,6 +328,99 @@ export function mergeState(a: ExamState, b: ExamState): ExamState {
     control,
     audit: mergeById(a.audit, b.audit, preferEvent),
     checkpoints: mergeById(a.checkpoints, b.checkpoints, preferCheckpoint),
+  }
+}
+
+// ---------- delta sync (scales to large halls: only changes travel, merged in O(changes)) ----------
+
+export interface StatePatch {
+  sessionId: string
+  createdAt: string
+  epoch?: number
+  full?: boolean // a complete snapshot (first sync, reset, restore)
+  candidates?: Record<string, CandidateSlice>
+  control?: ControlSlice
+  audit?: AuditEvent[]
+  checkpoints?: Checkpoint[]
+}
+
+export const isPatch = (value: unknown): value is StatePatch =>
+  Boolean(value && typeof (value as StatePatch).sessionId === 'string' && typeof (value as StatePatch).createdAt === 'string')
+
+export function patchOf(state: ExamState, full = true): StatePatch {
+  return { sessionId: state.sessionId, createdAt: state.createdAt, epoch: state.epoch, full, candidates: state.candidates, control: state.control, audit: state.audit, checkpoints: state.checkpoints }
+}
+
+const asState = (patch: StatePatch, control: ControlSlice): ExamState => ({
+  sessionId: patch.sessionId, createdAt: patch.createdAt, epoch: patch.epoch, candidates: patch.candidates ?? {}, control: patch.control ?? control, audit: patch.audit ?? [], checkpoints: patch.checkpoints ?? [],
+})
+
+// Keeps one ExamState plus id indexes so each patch costs O(changed items), not O(whole log).
+export class StateStore {
+  state?: ExamState
+  private events = new Map<string, AuditEvent>()
+  private cps = new Map<string, Checkpoint>()
+
+  private reindex() {
+    this.events = new Map(this.state!.audit.map((event) => [event.id, event]))
+    this.cps = new Map(this.state!.checkpoints.map((checkpoint) => [checkpoint.id, checkpoint]))
+  }
+
+  private upsert<T extends { id: string; at: string }>(list: T[], index: Map<string, T>, item: T, prefer: (a: T, b: T) => T) {
+    const existing = index.get(item.id)
+    if (existing) {
+      const chosen = prefer(existing, item)
+      if (chosen === existing) return false
+      for (let i = list.length - 1; i >= 0; i -= 1) if (list[i].id === item.id) { list[i] = chosen; break }
+      index.set(item.id, chosen)
+      return true
+    }
+    index.set(item.id, item)
+    let lo = 0
+    let hi = list.length
+    if (!hi || eventOrder(list[hi - 1], item) <= 0) lo = hi // common case: newest event goes last
+    else while (lo < hi) { const mid = (lo + hi) >> 1; if (eventOrder(list[mid], item) <= 0) lo = mid + 1; else hi = mid }
+    list.splice(lo, 0, item)
+    return true
+  }
+
+  // Returns true when the stored state changed. Mutates in place; callers copy for rendering.
+  apply(patch: StatePatch): boolean {
+    if (!this.state || patch.full || patch.sessionId !== this.state.sessionId) {
+      if (this.state && patch.sessionId === this.state.sessionId) {
+        this.state = mergeState(this.state, asState(patch, this.state.control))
+      } else if (!this.state) {
+        if (!patch.control) return false
+        this.state = asState(patch, patch.control)
+      } else {
+        if (!patch.full || !patch.control) return false // only a full snapshot can switch sessions
+        const next = mergeState(this.state, asState(patch, patch.control))
+        if (next === this.state) return false
+        this.state = next
+      }
+      this.reindex()
+      return true
+    }
+    const state = this.state
+    let changed = false
+    for (const [id, slice] of Object.entries(patch.candidates ?? {})) {
+      const current = state.candidates[id]
+      const chosen = current ? newerSlice(current, slice) : slice
+      if (chosen !== current) { state.candidates[id] = chosen; changed = true }
+    }
+    if (patch.control) {
+      const chosen = newer(state.control, patch.control)
+      if (chosen !== state.control) { state.control = chosen; changed = true }
+    }
+    for (const [id, at] of Object.entries(state.control.resets ?? {})) if (state.candidates[id] && state.candidates[id].loggedInAt <= at) { delete state.candidates[id]; changed = true }
+    for (const event of patch.audit ?? []) changed = this.upsert(state.audit, this.events, event, preferEvent) || changed
+    for (const checkpoint of patch.checkpoints ?? []) changed = this.upsert(state.checkpoints, this.cps, checkpoint, preferCheckpoint) || changed
+    return changed
+  }
+
+  // A fresh object graph for React (new identities for the parts that may have changed).
+  snapshot(): ExamState | undefined {
+    return this.state && { ...this.state, candidates: { ...this.state.candidates }, audit: this.state.audit.slice(), checkpoints: this.state.checkpoints.slice() }
   }
 }
 

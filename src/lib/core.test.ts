@@ -1,6 +1,6 @@
 // Run: npm test  (Node 22.6+ strips the types natively)
 import assert from 'node:assert/strict'
-import { apiReachable, offlineSeconds, remainingSeconds, classifyLosses, createState, lostInterval, mergeState, newCandidate, recommend, sealEvents, sha256, receiptBody, verifyChain, verifyReceipt, type AuditEvent, type Receipt } from './core.ts'
+import { StateStore, patchOf, apiReachable, offlineSeconds, remainingSeconds, classifyLosses, createState, lostInterval, mergeState, newCandidate, recommend, sealEvents, sha256, receiptBody, verifyChain, verifyReceipt, type AuditEvent, type Receipt } from './core.ts'
 
 const at = (s: number) => new Date(Date.UTC(2026, 9, 1, 9, 0, s)).toISOString()
 
@@ -92,5 +92,33 @@ assert.equal(mergeState(afterReset, oldAttempt).candidates['EXM-1'], undefined)
 assert.equal(mergeState(oldAttempt, afterReset).candidates['EXM-1'], undefined)
 const fresh = { ...afterReset, candidates: { 'EXM-1': { ...pc1.candidates['EXM-1'], loggedInAt: at(60) } } }
 assert.ok(mergeState(afterReset, fresh).candidates['EXM-1'])
+
+// Delta sync: applying patches one by one equals merging full states.
+{
+  const store = new StateStore()
+  const s0 = createState()
+  store.apply(patchOf(s0))
+  const e = (n: number, sec: number): AuditEvent => ({ id: `p${n}`, at: at(sec), kind: 'access', title: `t${n}`, detail: '', source: 'x' })
+  store.apply({ sessionId: s0.sessionId, createdAt: s0.createdAt, audit: [e(1, 5), e(3, 15)] })
+  store.apply({ sessionId: s0.sessionId, createdAt: s0.createdAt, audit: [e(2, 10)], candidates: { 'EXM-1': { ...newCandidate('EXM-1', 'A1'), rev: 1 } } })
+  store.apply({ sessionId: s0.sessionId, createdAt: s0.createdAt, audit: [{ ...e(2, 10), digest: 'D' }] })
+  assert.deepEqual(store.state!.audit.map((x) => x.id), ['p1', 'p2', 'p3'])
+  assert.equal(store.state!.audit[1].digest, 'D')
+  assert.ok(store.state!.candidates['EXM-1'])
+  assert.equal(store.apply({ sessionId: 'other', createdAt: at(1), audit: [e(9, 1)] }), false) // partial patch can't switch sessions
+  const reset = createState(5)
+  assert.equal(store.apply(patchOf(reset)), true)
+  assert.equal(store.state!.sessionId, reset.sessionId)
+}
+
+// Device takeover: the newest claim wins even if the old PC has a higher revision.
+{
+  const base2 = createState()
+  const oldPc = { ...base2, candidates: { 'EXM-1': { ...newCandidate('EXM-1', 'A1'), rev: 50, deviceId: 'old', deviceClaimAt: at(1) } } }
+  const newPc = { ...base2, candidates: { 'EXM-1': { ...newCandidate('EXM-1', 'A1'), rev: 3, deviceId: 'new', deviceClaimAt: at(9) } } }
+  assert.equal(mergeState(oldPc, newPc).candidates['EXM-1'].deviceId, 'new')
+  assert.equal(mergeState(newPc, oldPc).candidates['EXM-1'].deviceId, 'new')
+  assert.equal(mergeState(newPc, oldPc).candidates['EXM-1'].rev, 50)
+}
 
 console.log('core self-check passed')

@@ -76,7 +76,19 @@ export function useReceiptCheck(receipt: Receipt | undefined, state: ExamState) 
   useEffect(() => {
     if (!receipt) return
     let alive = true
-    void Promise.all([verifyReceipt(receipt, state.sessionId, state.audit), verifySignature(receipt)]).then(([result, signature]) => {
+    const local = async (): Promise<ReceiptCheck> => {
+      const result = await verifyReceipt(receipt, state.sessionId, state.audit)
+      // A candidate PC only holds its own part of the log: let the exam server check the full chain.
+      if (result.ok || !result.problem?.includes('missing from the evidence store')) return result
+      try {
+        const response = await fetch('/api/verify-receipt', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ receipt }) })
+        if (response.ok) return (await response.json()) as ReceiptCheck
+      } catch {
+        // offline: keep the local result
+      }
+      return result
+    }
+    void Promise.all([local(), verifySignature(receipt)]).then(([result, signature]) => {
       if (alive) setCheck({ ...result, ok: result.ok && signature !== 'invalid', signature })
     })
     return () => { alive = false }

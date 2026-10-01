@@ -78,6 +78,37 @@ Other PCs need HTTPS for the camera, so accept the certificate warning once on e
   - Each affected candidate gets a **Fairness Receipt** containing: incident, measured interval, answers preserved, remedy, reason, officer, receipt hash, and chain head. It also has a QR code linking to `/verify`.
   - If any recorded event is edited, verification fails.
 
+## Control Tower capabilities
+
+- **Live sessions:** every signed-in PC with progress, time left, heartbeat, RTT, battery, face count, AI risk, warnings and early-warning risk score.
+- **Early warning (prediction):** per-PC risk from latency vs baseline, jitter, missed heartbeats, battery and network type; per-path forecast (stable / degrading / outage likely) *before* an outage.
+- **Incidents:** auto-detected, classified as individual / shared path / platform-wide; low-stakes remedies auto-apply; others escalate to an officer, and become "Overdue" after 2 min. The **AI co-pilot** (Claude) reads the evidence and suggests a remedy; the officer decides.
+- **Analytics:** exam-level decision ("no re-conduct / targeted re-exam / re-conduct cohort"), reliability by centre, incidents over time, heartbeat-loss causes, cross-candidate patterns (identical wrong answers, identical code, implausibly fast correct streaks), per-candidate response reconciliation (sequence gaps, format, offline answers inside measured offline time = clock-tamper check, final sheet = log), and a **Claude post-exam risk report** with root causes and prevention steps.
+- **Communication:** announcements to all / a centre / one candidate, and automatic notices to affected candidates when an incident opens and when it is resolved.
+- **Infrastructure:** server uptime, event-loop lag, memory, relay sockets and throughput, durable-storage status, AI proctor health, signing key; one-click backup download / restore.
+- **Report:** `/report` is a printable exam report (save as PDF) with chain head, decisions, incidents, candidates and the AI risk report.
+
+## Evidence and recovery guarantees
+
+- **Durable server storage:** merged state is written to `data/state.json` (atomic rename), and every sealed event is appended once to `data/evidence.ndjson`. A server restarted with no browser open recovers the full session.
+- **Server-signed receipts:** before signing, the exam server re-verifies each receipt against its own evidence copy, then signs it with ECDSA P-256. The key is in `data/signing-key.json` and is never committed. `/verify` checks the signature in the browser with WebCrypto.
+
+## Scalability (measured)
+
+`npm run loadtest -- 200,1000,2500,5000 20` starts an isolated server and drives N simulated candidate PCs. Each PC sends a heartbeat every 2 s and an answer every ~10 s, and one Control Tower observer measures end-to-end delivery. Results on one MacBook (the server and the load generator share the CPU):
+
+| Candidates | Delivered | p50 | p99 | Event-loop lag (max) | Server memory |
+| --- | --- | --- | --- | --- | --- |
+| 1,000 | 100% | 6 ms | 123 ms | 3 ms | 157 MB |
+| 2,500 | 100% | 1 ms | 34 ms | 2 ms | 123 MB |
+| 5,000 | 100% | 1 ms | 71 ms | 3 ms | 210 MB |
+
+How it scales:
+- **Delta sync:** only changes travel.
+- **O(changes) merge:** the server store merges each update without re-sorting the log.
+- **Role-indexed routing:** a candidate's update goes only to the officers and that candidate's own devices.
+- **National scale:** run one relay per centre or service path behind a load balancer, and aggregate officer views. The protocol is already per-candidate and per-path.
+
 ## AI proctoring (Claude)
 
 - **How it works.** The browser sends one downscaled webcam frame every `PROCTOR_INTERVAL_SECONDS` (default 30 s), and also sends one when the candidate returns to the tab.
