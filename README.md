@@ -1,6 +1,6 @@
 # ExamShield
 
-A browser exam platform (Infosys/TCS-style) built around one idea: when an exam session is disrupted, prove what happened, pause the candidate's clock, keep every answer, and give a fair, officer-approved, verifiable remedy.
+A browser exam platform (Infosys/TCS-style) built around one idea: when an exam session is disrupted, keep the candidate working offline, keep every answer, prove what happened, and give a fair, officer-approved, verifiable remedy.
 
 
 
