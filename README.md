@@ -2,6 +2,10 @@
 
 A browser exam platform (Infosys/TCS-style) built around one idea: when an exam session is disrupted, prove what happened, pause the candidate's clock, keep every answer, and give a fair, officer-approved, verifiable remedy.
 
+
+
+<img width="1536" height="1024" alt="Examshield" src="https://github.com/user-attachments/assets/9286fb4f-734e-4292-a2a1-a063912601fe" />
+
 ## Run
 
 ```bash
