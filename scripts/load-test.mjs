@@ -36,7 +36,7 @@ await sleep(500)
 async function run(n, seconds) {
   const clients = []
   for (let i = 0; i < n; i++) {
-    const id = `LOAD-${String(i).padStart(4, '0')}`
+    const id = `LOAD-${n}-${String(i).padStart(4, '0')}` // unique per round: reused ids would restart at rev 1 and be (correctly) ignored as stale
     const ws = await open(WS)
     let candidateBytes = 0
     ws.on('message', (data) => { candidateBytes += data.length })
