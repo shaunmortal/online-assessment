@@ -1,287 +1,293 @@
-::: {align="center"}
-`<img src="./public/examshield-logo.webp" alt="ExamShield — Fair Exams. Trusted Results." width="850"/>`{=html}
+<p align="center">
+  <img src="./public/examshield-logo.webp" alt="ExamShield - Fair Exams. Trusted Results." width="440" />
+</p>
 
-# ExamShield
+<h1 align="center">ExamShield</h1>
 
-### Fair Exams. Trusted Results.
+<p align="center">
+  <strong>Fair Exams. Trusted Results.</strong><br />
+  <em>Prevention - Detection - Response - Recovery - Trust</em>
+</p>
 
-**Prevention → Detection → Response → Recovery → Trust**
-:::
+<p align="center">
+  <img src="https://img.shields.io/badge/Hackathon-MPOnline%202026-1f6feb?style=for-the-badge" alt="MPOnline Hackathon 2026" />
+  <img src="https://img.shields.io/badge/React-TypeScript-3178c6?style=for-the-badge" alt="React and TypeScript" />
+  <img src="https://img.shields.io/badge/Approach-Offline--first-167c80?style=for-the-badge" alt="Offline-first" />
+  <img src="https://img.shields.io/badge/Decisions-Human--approved-e3a008?style=for-the-badge" alt="Human-approved decisions" />
+</p>
 
-------------------------------------------------------------------------
+<p align="center">
+  <a href="#the-idea">The idea</a> &bull;
+  <a href="#product-views">Product views</a> &bull;
+  <a href="#architecture">Architecture</a> &bull;
+  <a href="#run-locally">Run locally</a> &bull;
+  <a href="#honest-boundaries">Boundaries</a>
+</p>
 
-> **ExamShield is an evidence-driven resilience layer for online
-> examinations: it prevents unsafe exam starts, detects session
-> disruptions, preserves candidate work, recommends proportionate
-> recovery, and generates verifiable evidence for fair, officer-approved
-> decisions.**
+> **ExamShield is an evidence-driven resilience layer for online examinations.** It prevents unsafe exam starts, detects session disruptions, preserves candidate work, recommends proportionate recovery, and generates verifiable evidence for fair, officer-approved decisions.
 
+<p align="center">
+  <img src="./public/readme/landing-hero.png" alt="ExamShield landing experience: The exam that never stops" width="100%" />
+</p>
 
-# ExamShield
+## The idea
 
-A browser exam platform built around one idea: when an exam session is
-disrupted, keep the candidate answering offline, keep every answer, prove
-what happened, and give a fair, officer-approved, verifiable remedy.
+An exam disruption should not automatically become a re-test for an entire hall - or an unprovable complaint for one candidate.
 
-## Run
+ExamShield is a browser exam platform built around one principle: **when a session is disrupted, keep the candidate answering offline, preserve every answer, measure what happened, and provide a fair, officer-approved, verifiable remedy.**
 
-``` bash
-npm install
-cp .env.example .env
-npm run dev
-```
+| What matters | How ExamShield responds |
+| --- | --- |
+| **A safe start** | A Readiness Gate checks the paper/version, language pack, timer drift, IndexedDB save channel, and exam-server heartbeat before the timer starts. |
+| **Continuity** | Answers are checkpointed to IndexedDB first and reconciled with the server after recovery. |
+| **Measured impact** | Heartbeats and a Control Tower identify individual and shared service disruptions. |
+| **A proportionate decision** | The Remedy Engine recommends `Recover`, `Protect Time`, or `Targeted Reschedule`; high-stakes outcomes require officer approval. |
+| **Trust after the incident** | A SHA-256 evidence chain and candidate-visible Fairness Receipt make the record verifiable. |
 
-  --------------------------------------------------------------------------------
-  URL                                          Who
-  -------------------------------------------- -----------------------------------
-  `http://localhost:5190/`                     Landing page
+## Product views
 
-  `http://localhost:5190/exam`                 Candidate exam
+<table>
+  <tr>
+    <td width="50%" valign="top"><strong>Candidate experience</strong><br /><sub>Sign in to a 27-question assessment with a clear, familiar exam flow.</sub><br /><br /><img src="./public/readme/candidate-login.png" alt="Candidate sign-in screen" /></td>
+    <td width="50%" valign="top"><strong>Exam Control Tower</strong><br /><sub>Live session, heartbeat, checkpoint, signal, and incident visibility for exam officers.</sub><br /><br /><img src="./public/readme/control-tower.png" alt="Exam Control Tower live sessions screen" /></td>
+  </tr>
+</table>
 
-  `http://localhost:5190/ops`                  Exam Control Tower
-
-  `http://localhost:5190/verify?r=<receipt>`   Fairness Receipt verification
-  --------------------------------------------------------------------------------
+<p align="center">
+  <img src="./public/readme/landing-resilience.png" alt="ExamShield resilience flow and Fairness Receipt preview" width="100%" />
+</p>
 
 ## Architecture
 
-### High-level flow
+### From candidate session to verifiable receipt
 
-``` mermaid
+```mermaid
 flowchart LR
-    C[Candidate Browser] --> G[Readiness Gate]
-    G --> E[Exam Session]
-    E --> CP[IndexedDB Answer Checkpoints]
-    E --> HB[Heartbeat / Session Signals]
-    HB --> T[Exam Control Tower]
-    T --> I[Incident Detection & Classification]
+    C[Candidate browser] --> G[Readiness Gate]
+    G --> E[Exam session]
+    E --> CP[IndexedDB answer checkpoints]
+    E --> H[Heartbeat and session signals]
+    H --> T[Exam Control Tower]
+    T --> I[Incident detection and classification]
     I --> R[Remedy Engine]
-    R --> O[Officer Approval]
+    R --> O[Officer approval]
     O --> F[Fairness Receipt]
-    F --> V[QR / Receipt Verification]
-    CP --> RC[Response Reconciliation]
+    F --> V[QR / receipt verification]
+    CP --> RC[Response reconciliation]
     RC --> F
     I --> EV[Evidence Vault]
-    EV --> HC[SHA-256 Hash Chain]
+    EV --> HC[SHA-256 hash chain]
     HC --> V
 ```
 
-### Resilience lifecycle
+### The resilience lifecycle
 
-``` mermaid
+```mermaid
 flowchart LR
-    P[Prevention<br/>Readiness Gate] --> D[Detection<br/>Heartbeat + Watchdog]
-    D --> S[Response<br/>Classify Incident]
-    S --> R[Recovery<br/>Preserve + Reconcile]
-    R --> T[Trust<br/>Receipt + Audit]
-    T --> A[Systemic Risk<br/>Prevent Recurrence]
+    P[Prevention<br/>Readiness Gate] --> D[Detection<br/>Heartbeat and watchdog]
+    D --> S[Response<br/>Classify the incident]
+    S --> R[Recovery<br/>Preserve and reconcile]
+    R --> T[Trust<br/>Receipt and audit]
+    T --> A[Learn<br/>Repeated failure signatures]
     A --> P
 ```
 
 ### Core components
 
-  -----------------------------------------------------------------------
-  Component                           Responsibility
-  ----------------------------------- -----------------------------------
-  Candidate App                       Readiness, exam, checkpointing,
-                                      recovery UX
+| Component | Responsibility |
+| --- | --- |
+| **Candidate App** | Readiness, instructions, exam flow, answer checkpointing, recovery UX, and submission. |
+| **Control Tower** | Live sessions, incidents, affected cohort visibility, officer workflow, and the Evidence Vault. |
+| **IndexedDB** | Local-first answer preservation and queued saves while connectivity is unavailable. |
+| **Heartbeat / Watchdog** | Session health signals and detection of silent or unavailable sessions. |
+| **Incident Engine** | Individual-versus-shared outage classification and escalation context. |
+| **Remedy Engine** | `Recover`, `Protect Time`, and `Targeted Reschedule` recommendations. |
+| **Evidence Vault** | Event history, SHA-256 chain status, export, and tamper testing. |
+| **Fairness Receipt** | Incident, measured impact, decision reason, officer, and verification data. |
 
-  Control Tower                       Live sessions, incidents, affected
-                                      cohort, officer workflow
+## Candidate experience
 
-  IndexedDB                           Local-first answer preservation
+ExamShield is designed to feel like an actual assessment, not a static dashboard.
 
-  Heartbeat / Watchdog                Session health and outage detection
+| Step | Candidate experience | What is protected |
+| --- | --- | --- |
+| 1 | **Login** with Candidate ID and date of birth. | A candidate-specific exam session. |
+| 2 | Review **Instructions**, sections, rules, language, and declaration. | Clear expectations before the paper begins. |
+| 3 | Complete the **Readiness Gate** before the timer starts. | Paper integrity, save-channel availability, and session health. |
+| 4 | Take the exam using the question palette, Save & Next, Mark for Review, and coding templates. | Every answer is checkpointed locally first. |
+| 5 | Work with **BlurShield** and a rotating session/time watermark. | The focused area stays readable while the sensitive layer is protected. |
+| 6 | Receive clear offline, recovery, and incident status. | The candidate can continue answering while queued saves await reconciliation. |
+| 7 | Submit and receive a response digest and, when applicable, a **Fairness Receipt**. | A record the candidate can verify. |
 
-  Incident Engine                     Individual vs shared outage
-                                      classification
+### Integrity signals are never automatic penalties
 
-  Remedy Engine                       Recover / Protect Time / Targeted
-                                      Reschedule
+The implementation can record fullscreen exits, tab/focus loss, copy/cut/paste/right-click/drag activity, camera loss or obstruction, and optional AI-proctor observations. These are **review-only signals** for an officer - not proof of misconduct, not automatic disqualification, and never an automatic mark change.
 
-  Evidence Vault                      Event history, hash chain, export
-                                      and tamper test
+## Resilience and recovery
 
-  Fairness Receipt                    Incident, impact, remedy, reason,
-                                      officer and verification hash
+### Detect -> keep working -> preserve -> remedy -> receipt
 
-  Systemic Risk Layer                 Correlates repeated failure
-                                      signatures and recommends
-                                      prevention
-  -----------------------------------------------------------------------
+```mermaid
+sequenceDiagram
+    participant C as Candidate browser
+    participant L as IndexedDB
+    participant T as Control Tower
+    participant O as Exam officer
+    participant V as Receipt verification
 
-## What a candidate goes through
+    C->>L: Checkpoint each answer locally
+    C->>T: Send heartbeat and session signals
+    Note over C: Connectivity is lost<br/>The timer keeps running offline
+    C->>L: Keep answers safe; queue sync work
+    T->>T: Watchdog detects and classifies impact
+    C->>T: Reconcile checkpoints after recovery
+    T->>O: Recommend the smallest fair remedy
+    O->>T: Approve high-stakes remedy
+    T->>V: Issue Fairness Receipt with evidence-chain head
+```
 
-1.  **Login** with Candidate ID + date of birth.
-2.  **Instructions**: section table, rules, language and declaration.
-3.  **Readiness Gate** verifies the paper/version, language pack, timer
-    drift, IndexedDB save channel and exam-server heartbeat before the
-    timer starts.
-4.  **Exam** with answer checkpoints written locally first and
-    reconciled with the server.
-5.  **BlurShield** keeps the focused area readable while a rotating
-    session/time watermark remains visible.
-6.  **Integrity signals** are review-only and are never used for
-    automatic penalties.
-7.  **Submit** creates a response digest and any applicable Fairness
-    Receipt.
+### Remedy Engine
 
-## Disruptions: detect → keep working offline → preserve → remedy → receipt
+| Situation | Recommendation | Decision rule |
+| --- | --- | --- |
+| Short individual interruption | `Recover` | Resume and reconcile the preserved work. |
+| Longer or shared interruption | `Protect Time` | Use the measured interruption evidence to protect fairness. |
+| Severe interruption, unreconciled answers, or insufficient remaining time | `Targeted Reschedule` | Re-schedule only affected candidate(s), not the whole cohort by default. |
 
--   **Detection:** the candidate browser sends a heartbeat every 2
-    seconds; the Control Tower watchdog detects silent sessions.
--   **Offline-first:** when the connection is lost, the exam timer keeps
-    running and a second "Offline" timer appears beside it; the candidate
-    keeps answering and moving between questions.
--   **Preserve:** answers remain safe in IndexedDB and queued saves
-    reconcile after recovery.
--   **Correlation:** multiple PCs losing heartbeat in the same service
-    window are classified as a shared outage.
--   **Remedy:** the engine recommends `Recover`, `Protect Time`, or
-    `Targeted Reschedule`; high-stakes actions require officer approval.
--   **Evidence:** events are sealed with SHA-256 and chained; the
-    affected candidate receives a verifiable Fairness Receipt.
+**No marks are automatically changed.** High-stakes remedies require officer approval.
 
-## Remedy Engine
+## Evidence and the Fairness Receipt
 
-  -----------------------------------------------------------------------
-  Situation                           Recommendation
-  ----------------------------------- -----------------------------------
-  Short individual interruption       `Recover`
+Every important event contributes to a SHA-256 hash chain. The candidate-facing Fairness Receipt makes the operational record inspectable instead of relying on a screenshot or a complaint alone.
 
-  Longer or shared interruption       `Protect Time`
+| The receipt records | Why it matters |
+| --- | --- |
+| Incident ID and measured interruption interval | Establishes what happened and for how long. |
+| Answers preserved and response reconciliation | Shows whether candidate work survived the interruption. |
+| Remedy and decision reason | Makes the remedy reviewable and proportionate. |
+| Officer approval | Keeps consequential decisions human-accountable. |
+| Receipt hash and evidence-chain head | Provides a verifiable link to the recorded evidence. |
+| QR verification link | Lets a recipient open the receipt-verification view. |
 
-  Severe interruption / unreconciled  `Targeted Reschedule`
-  answers / insufficient remaining    
-  time                                
-  -----------------------------------------------------------------------
+If a recorded event is edited, chain verification fails.
 
-**No marks are automatically changed.** High-stakes remedies require
-officer approval.
+## Challenge alignment - 12 resilience points
 
-## Evidence & Trust
+The project follows the MPOnline challenge framing across the assessment lifecycle, while being explicit about MVP limits.
 
-Every important event contributes to a SHA-256 hash chain.
+| # | Challenge point | ExamShield capability |
+| ---: | --- | --- |
+| 1 | Real-time monitoring | Candidate heartbeat, session state, and the Control Tower. |
+| 2 | Early detection and prediction | Readiness Gate plus heartbeat/watchdog signals; this is early detection, not a claim of a full predictive model. |
+| 3 | Incident detection, classification, and escalation | Individual/shared outage correlation and officer escalation. |
+| 4 | Backup and disaster recovery | IndexedDB-first checkpoints, queued saves, and recovery across session interruption. |
+| 5 | Tamper-evident storage | SHA-256 event hash chain, receipt hash, and tamper verification. |
+| 6 | Suspicious-pattern detection | Review-only integrity signals and incident correlation. |
+| 7 | Response reconciliation and validation | Queued answer reconciliation, sequence-aware checkpoints, and response digest. |
+| 8 | Candidate communication | Offline status, incident banners, recovery state, and candidate receipt. |
+| 9 | Reschedule / re-conduct decision support | `Recover` / `Protect Time` / `Targeted Reschedule` policy guidance. |
+| 10 | Fairness and consistency | Measured interruption interval, targeted remedy, and officer approval. |
+| 11 | Audit trail and evidence reporting | Evidence Vault, session reporting, export, and Fairness Receipt. |
+| 12 | AI analytics for systemic risks and recurrence prevention | Repeated failure signatures feed preventive recommendations; not a completed predictive-analytics system. |
 
-The Fairness Receipt records:
+## Technology
 
--   Incident ID
--   Measured interruption interval
--   Answers preserved
--   Remedy
--   Decision reason
--   Officer approval
--   Receipt hash
--   Evidence-chain head
--   QR verification link
+| Layer | Stack / approach |
+| --- | --- |
+| Client | React, TypeScript, and Vite |
+| Local resilience | IndexedDB, queued synchronization, and response reconciliation |
+| Real-time coordination | HTTP heartbeat, watchdog, WebSocket relay, and Control Tower |
+| Evidence | SHA-256 event chain, receipt verification, QR codes, and exportable evidence |
+| Assessment | Multi-section paper, question palette, English/Hindi UI, JavaScript and Python coding tasks |
+| Integrity | Browser signals, camera/mic and fullscreen checks, BlurShield, and watermarking |
+| AI review | Optional Claude vision observations processed server-side; frames are not stored by the application |
+| Visual experience | Three.js landing hero and a responsive candidate/operations interface |
 
-If a recorded event is edited, verification fails.
+## Run locally
 
-## Challenge Alignment --- 12 Resilience Points
+### Prerequisites
 
-  -----------------------------------------------------------------------
-  \#                      Challenge point         ExamShield capability
-  ----------------------- ----------------------- -----------------------
-  1                       Real-time monitoring    Candidate heartbeat,
-                                                  session state and
-                                                  Control Tower
+- Node.js 20+
+- A current desktop browser
+- Optional: an Anthropic API key for the AI-proctoring demo
 
-  2                       Early detection &       Readiness gate +
-                          prediction              heartbeat/watchdog
-                                                  signals
+### Start the app
 
-  3                       Incident detection,     Individual/shared
-                          classification &        incident correlation +
-                          escalation              officer escalation
+```bash
+npm install
+cp .env.example .env
+npm run dev
+```
 
-  4                       Backup & disaster       IndexedDB-first
-                          recovery                checkpoints and
-                                                  recovery across session
-                                                  interruption
+On Windows PowerShell, use the following instead of `cp`:
 
-  5                       Tamper-evident storage  SHA-256 event hash
-                                                  chain + receipt hash
+```powershell
+Copy-Item .env.example .env
+```
 
-  6                       Suspicious pattern      Review-only integrity
-                          detection               signals and incident
-                                                  correlation
+| URL | Experience |
+| --- | --- |
+| `http://localhost:5190/` | Landing page and product story |
+| `http://localhost:5190/exam` | Candidate assessment |
+| `http://localhost:5190/ops` | Exam Control Tower |
+| `http://localhost:5190/verify?r=<receipt>` | Fairness Receipt verification |
 
-  7                       Response reconciliation Queued answer
-                          & validation            reconciliation,
-                                                  sequence numbers and
-                                                  response digest
+### Run an exam hall on a LAN
 
-  8                       Candidate communication Offline status,
-                                                  incident banners,
-                                                  recovery state and
-                                                  receipt
+```bash
+npm run dev:lan
+```
 
-  9                       Reschedule / re-conduct Recover / Protect Time
-                          decision support        / Targeted Reschedule
-                                                  policy
+This exposes the app at `https://<this-machine-ip>:5190` using a self-signed certificate. Each candidate PC needs HTTPS for camera access, so accept the certificate warning once on each machine. Every signed-in PC then appears in `/ops`.
 
-  10                      Fairness & consistency  Measured interruption
-                                                  interval, targeted
-                                                  remedy and officer
-                                                  approval
+### Demo credentials
 
-  11                      Audit trail & evidence  Evidence Vault, session
-                          reporting               report, export and
-                                                  candidate receipt
+| Candidate ID | Date of birth |
+| --- | --- |
+| `EXM-20841` | `14082004` |
+| `EXM-20854` | `02112003` |
+| `EXM-20873` | `17072004` |
+| `EXM-20891` | `19092003` |
 
-  12                      AI analytics for        Repeated failure
-                          systemic risks &        signatures → preventive
-                          recurrence prevention   recommendation
-  -----------------------------------------------------------------------
+The full demo roster is defined in `src/data/paper.ts`.
 
-## AI proctoring
+## Demo checklist
 
-The current implementation can use Claude vision for review-only
-integrity observations. Frames are processed server-side and are not
-stored by the application. These signals support officer review; they do
-not perform biometric identity verification or automatic punishment.
+1. Open `/exam` and sign in with a demo candidate.
+2. Walk through instructions and show the Readiness Gate before starting the paper.
+3. Save a few answers, then open `/ops` in another tab to show the live session.
+4. Use the Control Tower's simulation controls to demonstrate an interruption and recovery.
+5. Verify that local checkpoints reconcile and inspect the incident/evidence record.
+6. Show the officer-approved remedy and open the generated Fairness Receipt.
+7. Scan or open the receipt verification link and run the tamper check.
 
-## Develop
+## Development
 
-``` bash
+```bash
 npm test
 npm run build
 ```
 
-  -----------------------------------------------------------------------
-  Path                                What
-  ----------------------------------- -----------------------------------
-  `src/lib/core.ts`                   Types, hash chain, receipt
-                                      verification, multi-PC merge,
-                                      remedy engine and timer
-
-  `src/state.ts`                      Sync, IndexedDB, heartbeat,
-                                      watchdog and actions
-
-  `src/candidate.tsx`                 Login, readiness gate, exam and
-                                      submit
-
-  `src/ops.tsx`                       Control Tower, incidents, remedies
-                                      and evidence vault
-
-  `server/proctor.ts`                 Heartbeat and AI-proctor API
-
-  `vite.config.ts`                    Dev server and LAN mode
-  -----------------------------------------------------------------------
+| Path | What it contains |
+| --- | --- |
+| `src/lib/core.ts` | Types, hash chain, receipt verification, multi-PC merge, Remedy Engine, and timer logic. |
+| `src/state.ts` | Synchronization, IndexedDB, heartbeat, watchdog, and session actions. |
+| `src/candidate.tsx` | Login, instructions, Readiness Gate, exam flow, and submit. |
+| `src/ops.tsx` | Control Tower, incidents, remedies, and Evidence Vault. |
+| `src/hooks/useIntegrity.ts` | Camera/mic, live-presence, fullscreen, obstruction checks, and AI-proctor loop. |
+| `src/lib/runner.ts` | JavaScript and Python coding-task runners. |
+| `server/proctor.ts` | Heartbeat and optional AI-proctor API. |
+| `vite.config.ts` | Dev server, relay, and HTTPS LAN mode. |
 
 ## Honest boundaries
 
--   The MVP demonstrates **software-session resilience**.
--   It does not claim CCTV, biometric identity verification,
-    physical-centre telemetry, power-grid monitoring or guaranteed
-    screenshot prevention.
--   Production deployment would add an authenticated backend-owned
-    session store, officer authentication and server-side receipt
-    signing.
--   Integrity signals are review-only and should not be treated as proof
-    of misconduct by themselves.
+- This is an MVP demonstrating **software-session resilience**, not a claim of complete physical-centre monitoring.
+- It does not claim CCTV, biometric identity verification, physical-centre telemetry, power-grid monitoring, or guaranteed screenshot prevention.
+- Browser-side integrity signals and AI observations are review-only; they should never be treated as proof of misconduct on their own.
+- A production deployment needs hardened authentication and roles, a backend-owned durable session store, policy and accessibility review, and independently managed evidence/signing infrastructure.
 
-## Core idea
+---
 
-> **When an online exam fails, make the failure measurable, the recovery
-> fair, and the evidence trustworthy.**
+<p align="center">
+  <strong>When an online exam fails, make the failure measurable, the recovery fair, and the evidence trustworthy.</strong>
+</p>
