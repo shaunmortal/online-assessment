@@ -358,7 +358,9 @@ input[type=checkbox], input[type=radio] { accent-color: var(--ink); }
 .sessions .icons { white-space: nowrap; }
 .sessions .icons > * { margin-right: 6px; vertical-align: middle; }
 .sessions .ai-cell { max-width: 240px; }
-.sessions .actions { display: grid; gap: 6px; justify-items: start; }
+.sessions .actions { white-space: nowrap; } /* stays a table cell so the row border spans it */
+.sessions .actions > * { display: flex; width: max-content; margin-bottom: 6px; }
+.sessions .actions > *:last-child { margin-bottom: 0; }
 .incident { border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; margin-bottom: 12px; display: grid; gap: 12px; position: relative; overflow: hidden; }
 .incident::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--warn); }
 .incident.ongoing::before { background: var(--bad); }
