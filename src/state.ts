@@ -234,7 +234,8 @@ export function analyseIncident(state: ExamState, incident: Incident, at = Date.
     scope: correlation.scope,
     path: correlation.path,
     lostSeconds,
-    ready: Boolean(incident.restoredAt) && Object.values(intervals).every(Boolean),
+    // A candidate the officer reset no longer has an attempt to measure; don't wait for them forever.
+    ready: Boolean(incident.restoredAt) && incident.affected.every((id) => intervals[id] || !state.candidates[id]),
     policy: rec.policy,
     needsOfficer: rec.needsOfficer,
     reasons: rec.reasons,
@@ -697,9 +698,11 @@ export function useExam() {
 
   const myPhase = mine?.phase
   const isCandidateRoute = window.location.pathname.startsWith('/exam')
+  // Submitted while offline: keep probing until the outage is closed and queued answers are reconciled.
+  const pendingSync = myPhase === 'submitted' && Boolean(mine?.outages.some((outage) => !outage.to) || state.checkpoints.some((c) => c.candidateId === me && c.status === 'queued'))
 
   useEffect(() => {
-    if (!isCandidateRoute || (myPhase !== 'gate' && myPhase !== 'exam')) return
+    if (!isCandidateRoute || (myPhase !== 'gate' && myPhase !== 'exam' && !pendingSync)) return
     let busy = false
     const tick = async () => {
       if (busy) return
@@ -732,12 +735,13 @@ export function useExam() {
       if (slice && slice.phase === 'gate' && httpOk && Date.now() - Date.parse(slice.lastHeartbeatAt ?? '0') > 1500) {
         mutate((latest) => patchSlice(latest, id, { lastHeartbeatAt: tickAt })) // lets the Control Tower see a PC go silent at the gate
       }
-      if (slice?.phase !== 'exam' || (slice.deviceId && slice.deviceId !== deviceId)) return
+      const syncing = slice?.phase === 'submitted'
+      if (!slice || (slice.phase !== 'exam' && !syncing) || (slice.deviceId && slice.deviceId !== deviceId)) return
       const ok = httpOk && apiReachable(stateRef.current, id)
       // Two consecutive failures before declaring an outage: a slow first request on a cold load is not one.
       failStreak.current = ok ? 0 : failStreak.current + 1
       if (!ok) missedAt.current = [...missedAt.current.filter((time) => Date.now() - time < 300_000), Date.now()]
-      if (ok && Date.now() - lastTelemetry.current > 10_000) {
+      if (ok && !syncing && Date.now() - lastTelemetry.current > 10_000) {
         lastTelemetry.current = Date.now()
         void collectTelemetry(rttSamples.current, rttBaseline.current, missedAt.current).then((telemetry) => mutate((latest) => patchSlice(latest, id, { telemetry })))
       }
@@ -747,7 +751,11 @@ export function useExam() {
       const at = tickAt
       const lastGood = lastGoodRef.current
       if (ok) lastGoodRef.current = at
-      if (ok && open) {
+      const queuedNow = stateRef.current.checkpoints.some((checkpoint) => checkpoint.candidateId === id && checkpoint.status === 'queued')
+      if (ok && !open && queuedNow) {
+        // Queued before the outage was confirmed (or submitted offline): reconcile without an outage record.
+        mutate((latest) => ({ ...latest, checkpoints: latest.checkpoints.map((checkpoint) => (checkpoint.status === 'queued' && checkpoint.candidateId === id ? { ...checkpoint, status: 'verified' as const, reconciledAt: at } : checkpoint)) }))
+      } else if (ok && open) {
         const queued = stateRef.current.checkpoints.filter((checkpoint) => checkpoint.candidateId === id && checkpoint.status === 'queued').length
         const lost = secondsBetween(open.from, at)
         mutate((latest) => {
@@ -761,7 +769,7 @@ export function useExam() {
             event('recovery', 'Exam-server heartbeat restored', `Connection back after ${lost}s (from last good heartbeat). ${queued} queued checkpoint(s) reconciled without conflict.`, `Candidate app · ${id}`, id, { lostSeconds: lost, reconciled: queued, from: open.from, to: at }),
           )
         })
-      } else if (!ok && !open && failStreak.current >= 2) {
+      } else if (!ok && !open && !syncing && failStreak.current >= 2) {
         // Measure from the last good tick (≤ 2 s before the first failure).
         const from = lastGood && lastGood >= (slice.startedAt ?? '') ? lastGood : failStart.current ?? at
         const cause = httpOk ? 'exam-api' : navigator.onLine ? 'server-unreachable' : 'browser-offline'
@@ -783,7 +791,7 @@ export function useExam() {
       window.removeEventListener('online', onNetwork)
       window.removeEventListener('offline', onNetwork)
     }
-  }, [isCandidateRoute, myPhase, me, mutate])
+  }, [isCandidateRoute, myPhase, pendingSync, me, mutate])
 
   // ---------------- Control Tower actions ----------------
 

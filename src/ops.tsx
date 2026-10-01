@@ -120,7 +120,7 @@ export function OpsApp({ api }: { api: ExamApi }) {
           <Metric icon={<Activity size={18} />} label="Heartbeat OK" value={`${healthy.length}/${inExam.length}`} detail="in-exam sessions" tone={healthy.length === inExam.length ? 'good' : 'bad'} />
           <Metric icon={<ShieldAlert size={18} />} label="Review signals" value={String(state.audit.filter((e) => e.kind === 'integrity').length)} detail="integrity events" tone="warn" />
           <Metric icon={<Bot size={18} />} label="AI flags" value={String(state.audit.filter((e) => e.kind === 'ai').length)} detail="Claude frame reviews" tone="warn" />
-          <Metric icon={<Database size={18} />} label="Checkpoints" value={String(state.checkpoints.length)} detail={`${state.checkpoints.filter((c) => c.status === 'queued').length} queued`} />
+          <Metric icon={<Database size={18} />} label="Checkpoints" value={String(state.checkpoints.length)} detail={`${state.checkpoints.filter((c) => c.status === 'queued' && state.candidates[c.candidateId] && c.at >= state.candidates[c.candidateId].loggedInAt).length} queued`} />
         </section>
 
         <section className="panel" id="sessions">
