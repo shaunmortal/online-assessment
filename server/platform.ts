@@ -6,7 +6,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeF
 import { join } from 'node:path'
 import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 import { WebSocket, WebSocketServer } from 'ws'
-import { StateStore, isExamState, isPatch, patchOf, verifyReceipt, type ExamState, type Receipt, type StatePatch } from '../src/lib/core'
+import { StateStore, createState, isExamState, isPatch, patchOf, verifyReceipt, type ExamState, type Receipt, type StatePatch } from '../src/lib/core'
 import { aiBudget, createProctorHandler, proctorStats, setAiDailyLimit, takeAiBudget } from './proctor'
 import { rosterEntry } from '../src/data/paper'
 
@@ -110,6 +110,9 @@ export function attachPlatform(httpServer: Server | null | undefined, use: (hand
   } catch {
     // first run
   }
+  // Seed a session so candidates can sync before any officer opens the Control Tower (fresh deploy/restart).
+  // Epoch 0: any real session an officer brings back still wins the merge.
+  if (!store.state) store.apply(patchOf(createState(0)))
   const logged = new Set<string>()
   try {
     for (const line of readFileSync(EVIDENCE_FILE, 'utf8').split('\n')) if (line) logged.add(JSON.parse(line).id)
