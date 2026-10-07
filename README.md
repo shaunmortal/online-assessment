@@ -149,7 +149,7 @@ sequenceDiagram
     C->>L: Checkpoint each answer locally
     C->>T: Send heartbeat and session signals
     Note over C: Connectivity is lost, the timer keeps running offline
-    C->>L: Keep answers safe; queue sync work
+    C->>L: Keep answers safe, queue sync work
     T->>T: Watchdog detects and classifies impact
     C->>T: Reconcile checkpoints after recovery
     T->>O: Recommend the smallest fair remedy
