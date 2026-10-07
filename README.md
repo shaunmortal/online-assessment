@@ -26,7 +26,7 @@
 </p>
 
 <p align="center">
-  <a href="https://examshield-q9i5.onrender.com">Live demo</a> &bull;
+  <a href="#live-demo">Live demo</a> &bull;
   <a href="#the-idea">The idea</a> &bull;
   <a href="#product-views">Product views</a> &bull;
   <a href="#architecture">Architecture</a> &bull;
@@ -35,6 +35,22 @@
 </p>
 
 > **ExamShield is an evidence-driven resilience layer for online examinations.** It prevents unsafe exam starts, detects session disruptions, preserves candidate work, recommends proportionate recovery, and generates verifiable evidence for fair, officer-approved decisions.
+
+## Live demo
+
+### 🔗 **https://examshield-q9i5.onrender.com**
+
+No install needed. Open these in any browser:
+
+| Open | What you see |
+| --- | --- |
+| **[examshield-q9i5.onrender.com](https://examshield-q9i5.onrender.com)** | Landing page and product story |
+| **[examshield-q9i5.onrender.com/exam](https://examshield-q9i5.onrender.com/exam)** | Candidate exam. Sign in with `EXM-20841` / DOB `14082004` |
+| **[examshield-q9i5.onrender.com/ops](https://examshield-q9i5.onrender.com/ops)** | Exam Control Tower (officer passcode) |
+| **[examshield-q9i5.onrender.com/verify](https://examshield-q9i5.onrender.com/verify)** | Fairness Receipt verification |
+| **[examshield-q9i5.onrender.com/report](https://examshield-q9i5.onrender.com/report)** | Printable session report |
+
+> Free Render instance: the first visit after 15 idle minutes takes 30 to 60 seconds to wake up. Wait for it, then everything is instant.
 
 <p align="center">
   <img src="./public/readme/landing-hero.png" alt="ExamShield landing experience: The exam that never stops" width="100%" />
