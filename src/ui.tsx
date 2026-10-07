@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import QRCode from 'qrcode'
-import { CheckCircle2, Download, ShieldCheck, ShieldX, X } from 'lucide-react'
+import { CheckCircle2, Download, Printer, ShieldCheck, ShieldX, X } from 'lucide-react'
 import { verifyReceipt, type ExamState, type Receipt, type ReceiptCheck } from './lib/core'
 import { serverKey } from './lib/paperClient'
 
@@ -154,7 +154,8 @@ export function VerifyBadge({ check }: { check: ReceiptCheck | null }) {
     : <Pill tone="bad"><ShieldX size={13} /> Verification failed</Pill>
 }
 
-export function ReceiptModal({ receipt, state, onClose }: { receipt: Receipt; state: ExamState; onClose: () => void }) {
+// printable: only from the Control Tower. Exam-hall PCs never print (see @media print in styles.css); the officer hands the paper over at exit.
+export function ReceiptModal({ receipt, state, onClose, printable }: { receipt: Receipt; state: ExamState; onClose: () => void; printable?: boolean }) {
   const check = useReceiptCheck(receipt, state)
   const [qr, setQr] = useState('')
   const verifyUrl = `${window.location.origin}/verify?r=${encodeURIComponent(receipt.id)}&h=${receipt.hash.slice(0, 16)}`
@@ -203,6 +204,7 @@ export function ReceiptModal({ receipt, state, onClose }: { receipt: Receipt; st
         </div>
         <footer>
           <a className="btn ghost" href={verifyUrl} target="_blank" rel="noreferrer">Open verification page</a>
+          {printable && <button className="btn ghost" onClick={() => window.print()}><Printer size={15} /> Print for candidate</button>}
           <button className="btn primary" onClick={download}><Download size={15} /> Download receipt (.json)</button>
         </footer>
       </section>

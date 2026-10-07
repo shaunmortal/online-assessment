@@ -422,6 +422,12 @@ input[type=checkbox], input[type=radio] { accent-color: var(--ink); }
 @media print {
   .exam, .modal-backdrop { display: none !important; }
   body:has(.exam)::after { content: 'Printing is disabled during the examination.'; display: block; padding: 40px; font-size: 20px; }
+  /* Control Tower: a Fairness Receipt prints alone, QR included, so the officer can hand it to the candidate at exit. */
+  body:not(:has(.exam)):has(.modal.receipt) * { visibility: hidden; }
+  body:not(:has(.exam)) .modal-backdrop:has(.modal.receipt) { display: block !important; position: absolute; inset: 0 auto auto 0; width: 100%; padding: 0; background: none; backdrop-filter: none; }
+  .modal.receipt, .modal.receipt * { visibility: visible; }
+  .modal.receipt { width: 100%; max-height: none; box-shadow: none; }
+  .modal.receipt .close, .modal.receipt footer { display: none; }
 }
 
 /* code editor shell */

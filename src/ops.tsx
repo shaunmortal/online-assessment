@@ -245,7 +245,7 @@ export function OpsApp({ api }: { api: ExamApi }) {
 
         <EvidenceVault state={state} api={api} chain={chain} filter={filter} setFilter={setFilter} receipts={allReceipts.map((r) => r.id)} onReceipt={setReceiptId} />
       </section>
-      {receipt && <ReceiptModal receipt={receipt} state={state} onClose={() => setReceiptId(null)} />}
+      {receipt && <ReceiptModal receipt={receipt} state={state} printable onClose={() => setReceiptId(null)} />}
       {reportFor && (
         <div className="modal-backdrop" onClick={() => setReportFor(null)}>
           <section className="modal" role="dialog" aria-labelledby="report-title" onClick={(e) => e.stopPropagation()}>

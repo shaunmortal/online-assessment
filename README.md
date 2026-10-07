@@ -14,9 +14,19 @@
   <img src="https://img.shields.io/badge/React-TypeScript-3178c6?style=for-the-badge" alt="React and TypeScript" />
   <img src="https://img.shields.io/badge/Approach-Offline--first-167c80?style=for-the-badge" alt="Offline-first" />
   <img src="https://img.shields.io/badge/Decisions-Human--approved-e3a008?style=for-the-badge" alt="Human-approved decisions" />
+  <a href="https://examshield-q9i5.onrender.com"><img src="https://img.shields.io/badge/Live%20demo-examshield--q9i5.onrender.com-16a34a?style=for-the-badge&logo=render&logoColor=white" alt="Live demo on Render" /></a>
 </p>
 
 <p align="center">
+  <strong>Live demo:</strong> <a href="https://examshield-q9i5.onrender.com">https://examshield-q9i5.onrender.com</a> &nbsp;·&nbsp;
+  <a href="https://examshield-q9i5.onrender.com/exam">/exam</a> candidate &nbsp;·&nbsp;
+  <a href="https://examshield-q9i5.onrender.com/ops">/ops</a> Control Tower &nbsp;·&nbsp;
+  <a href="https://examshield-q9i5.onrender.com/verify">/verify</a> receipt check<br />
+  <sub>Free Render instance: the first visit after 15 idle minutes takes 30 to 60 s to wake up. The 11 MB face-detector wasm loads from jsDelivr on first use.</sub>
+</p>
+
+<p align="center">
+  <a href="https://examshield-q9i5.onrender.com">Live demo</a> &bull;
   <a href="#the-idea">The idea</a> &bull;
   <a href="#product-views">Product views</a> &bull;
   <a href="#architecture">Architecture</a> &bull;
@@ -42,7 +52,7 @@ ExamShield is a browser exam platform built around one principle: **when a sessi
 | **Continuity** | Answers are checkpointed to IndexedDB first and reconciled with the server after recovery. |
 | **Measured impact** | Heartbeats and a Control Tower identify individual and shared service disruptions. |
 | **A proportionate decision** | The Remedy Engine recommends `Recover`, `Protect Time`, or `Targeted Reschedule`; high-stakes outcomes require officer approval. |
-| **Trust after the incident** | A SHA-256 evidence chain and candidate-visible Fairness Receipt make the record verifiable. |
+| **Trust after the incident** | A SHA-256 evidence chain and a server-signed Fairness Receipt, printed and handed to the candidate at exit, make the record verifiable by anyone who questions it later. |
 
 ## Product views
 
@@ -71,8 +81,9 @@ flowchart LR
     T --> I[Incident detection and classification]
     I --> R[Remedy Engine]
     R --> O[Officer approval]
-    O --> F[Fairness Receipt]
-    F --> V[QR / receipt verification]
+    O --> F[Fairness Receipt, server-signed]
+    F --> PR[Printed in the Control Tower, handed over at exit]
+    PR --> V[Verified later by candidate, appeal board or auditor via QR or /verify]
     CP --> RC[Response reconciliation]
     RC --> F
     I --> EV[Evidence Vault]
@@ -103,7 +114,7 @@ flowchart LR
 | **Incident Engine** | Individual-versus-shared outage classification and escalation context. |
 | **Remedy Engine** | `Recover`, `Protect Time`, and `Targeted Reschedule` recommendations. |
 | **Evidence Vault** | Event history, SHA-256 chain status, export, and tamper testing. |
-| **Fairness Receipt** | Incident, measured impact, decision reason, officer, and verification data. |
+| **Fairness Receipt** | Incident, measured impact, decision reason, officer, ECDSA P-256 server signature, QR to `/verify`. Printed from the Control Tower. |
 
 ## Candidate experience
 
@@ -117,7 +128,7 @@ ExamShield is designed to feel like an actual assessment, not a static dashboard
 | 4 | Take the exam using the question palette, Save & Next, Mark for Review, and coding templates. | Every answer is checkpointed locally first. |
 | 5 | Work with **BlurShield** and a rotating session/time watermark. | The focused area stays readable while the sensitive layer is protected. |
 | 6 | Receive clear offline, recovery, and incident status. | The candidate can continue answering while queued saves await reconciliation. |
-| 7 | Submit and receive a response digest and, when applicable, a **Fairness Receipt**. | A record the candidate can verify. |
+| 7 | Submit, confirm or dispute each detected issue, and receive a response digest and, when applicable, a **Fairness Receipt**. | A signed record the candidate takes home on paper. |
 
 ### Integrity signals are never automatic penalties
 
@@ -137,7 +148,7 @@ sequenceDiagram
 
     C->>L: Checkpoint each answer locally
     C->>T: Send heartbeat and session signals
-    Note over C: Connectivity is lost; the timer keeps running offline
+    Note over C: Connectivity is lost, the timer keeps running offline
     C->>L: Keep answers safe; queue sync work
     T->>T: Watchdog detects and classifies impact
     C->>T: Reconcile checkpoints after recovery
@@ -158,7 +169,11 @@ sequenceDiagram
 
 ## Evidence and the Fairness Receipt
 
-Every important event contributes to a SHA-256 hash chain. The candidate-facing Fairness Receipt makes the operational record inspectable instead of relying on a screenshot or a complaint alone.
+Every important event contributes to a SHA-256 hash chain. The Fairness Receipt makes the operational record inspectable instead of relying on a screenshot or a complaint alone.
+
+**How the receipt reaches the candidate.** Phones are not allowed in an exam hall and exam-hall PCs never print (the candidate app blocks printing). So the receipt is issued the way a hall ticket is: the officer opens it in the Control Tower, presses **Print for candidate**, and hands the paper over at exit. The candidate can also see it on screen after submitting.
+
+**Who scans the QR, and when.** Nobody at the centre. The QR is for whoever questions the receipt later, often weeks later: the candidate at home, a parent, an appeal board, an RTI officer or an auditor. One scan opens `/verify`, which fetches the receipt, recomputes the hash chain and checks the server's ECDSA P-256 signature in the browser. The centre's word is never the only evidence. Without a phone, the receipt ID and hash printed on the paper do the same job at `/verify`, and a downloaded `.json` can be uploaded there too.
 
 | The receipt records | Why it matters |
 | --- | --- |
@@ -167,7 +182,8 @@ Every important event contributes to a SHA-256 hash chain. The candidate-facing 
 | Remedy and decision reason | Makes the remedy reviewable and proportionate. |
 | Officer approval | Keeps consequential decisions human-accountable. |
 | Receipt hash and evidence-chain head | Provides a verifiable link to the recorded evidence. |
-| QR verification link | Lets a recipient open the receipt-verification view. |
+| Server signature (ECDSA P-256) | Proves the exam server, not the centre, issued this exact receipt. |
+| QR to `/verify` | Lets an appeal board or auditor verify the paper later with one scan. |
 
 If a recorded event is edited, chain verification fails.
 
@@ -210,7 +226,7 @@ The project follows the MPOnline challenge framing across the assessment lifecyc
 | Client | React, TypeScript, and Vite |
 | Local resilience | IndexedDB, queued synchronization, and response reconciliation |
 | Real-time coordination | HTTP heartbeat, watchdog, WebSocket relay, and Control Tower |
-| Evidence | SHA-256 event chain, receipt verification, QR codes, and exportable evidence |
+| Evidence | SHA-256 event chain, ECDSA P-256 signed receipts, printable receipt with QR, `/verify`, and exportable evidence |
 | Assessment | Multi-section paper, question palette, English/Hindi UI, JavaScript and Python coding tasks |
 | Integrity | Browser signals, camera/mic and fullscreen checks, BlurShield, and watermarking |
 | AI review | Optional Claude vision observations processed server-side; frames are not stored by the application |
@@ -238,12 +254,15 @@ On Windows PowerShell, use the following instead of `cp`:
 Copy-Item .env.example .env
 ```
 
-| URL | Experience |
-| --- | --- |
-| `http://localhost:5190/` | Landing page and product story |
-| `http://localhost:5190/exam` | Candidate assessment |
-| `http://localhost:5190/ops` | Exam Control Tower |
-| `http://localhost:5190/verify?r=<receipt>` | Fairness Receipt verification |
+| Local | Live | Experience |
+| --- | --- | --- |
+| `http://localhost:5190/` | [examshield-q9i5.onrender.com](https://examshield-q9i5.onrender.com) | Landing page and product story |
+| `http://localhost:5190/exam` | [/exam](https://examshield-q9i5.onrender.com/exam) | Candidate assessment |
+| `http://localhost:5190/ops` | [/ops](https://examshield-q9i5.onrender.com/ops) | Exam Control Tower (officer passcode) |
+| `http://localhost:5190/verify?r=<receipt>` | [/verify](https://examshield-q9i5.onrender.com/verify) | Fairness Receipt verification |
+| `http://localhost:5190/report` | [/report](https://examshield-q9i5.onrender.com/report) | Printable session report |
+
+The live instance runs on Render's free tier from `render.yaml` and redeploys on every push to `main`. It sleeps after 15 idle minutes, so the first request can take up to a minute, and its in-memory session resets on each deploy.
 
 ### Run an exam hall on a LAN
 
@@ -279,8 +298,9 @@ The full demo roster is defined in `src/data/paper.ts`.
 3. Save a few answers, then open `/ops` in another tab to show the live session.
 4. Use the Control Tower's simulation controls to demonstrate an interruption and recovery.
 5. Verify that local checkpoints reconcile and inspect the incident/evidence record.
-6. Show the officer-approved remedy and open the generated Fairness Receipt.
-7. Scan or open the receipt verification link and run the tamper check.
+6. Show the officer-approved remedy and open the generated Fairness Receipt in the Control Tower.
+7. Press **Print for candidate**: this is the paper the candidate takes home.
+8. Play the appeal board: open the verification link (or scan the QR from the printout) and run the tamper check.
 
 ## Development
 
@@ -302,22 +322,22 @@ npm run build
 
 ## Contributors
 
-<p align="center">
-  <a href="https://github.com/shaunmortal">
-    <img src="https://avatars.githubusercontent.com/u/218578165?v=4" width="104" height="104" alt="Ayush Kumar" style="border-radius: 50%; border: 4px solid #2563eb;" /><br />
-    <sub><b>Ayush Kumar</b></sub>
-  </a>
-  &nbsp;&nbsp;&nbsp;
-  <a href="https://github.com/Cod4Nitish">
-    <img src="https://avatars.githubusercontent.com/u/181256622?v=4" width="104" height="104" alt="Nitish Singh" style="border-radius: 50%; border: 4px solid #7c3aed;" /><br />
-    <sub><b>Nitish Singh</b></sub>
-  </a>
-  &nbsp;&nbsp;&nbsp;
-  <a href="https://github.com/harsh-1-code">
-    <img src="https://avatars.githubusercontent.com/u/218582164?v=4" width="104" height="104" alt="Harsh Kumar" style="border-radius: 50%; border: 4px solid #16a34a;" /><br />
-    <sub><b>Harsh Kumar</b></sub>
-  </a>
-</p>
+<table align="center">
+  <tr>
+    <td align="center" width="160">
+      <a href="https://github.com/shaunmortal"><img src="https://avatars.githubusercontent.com/u/218578165?v=4" width="104" height="104" alt="Ayush Kumar" /></a><br />
+      <a href="https://github.com/shaunmortal"><b>Ayush Kumar</b></a>
+    </td>
+    <td align="center" width="160">
+      <a href="https://github.com/Cod4Nitish"><img src="https://avatars.githubusercontent.com/u/181256622?v=4" width="104" height="104" alt="Nitish Singh" /></a><br />
+      <a href="https://github.com/Cod4Nitish"><b>Nitish Singh</b></a>
+    </td>
+    <td align="center" width="160">
+      <a href="https://github.com/harsh-1-code"><img src="https://avatars.githubusercontent.com/u/218582164?v=4" width="104" height="104" alt="Harsh Kumar" /></a><br />
+      <a href="https://github.com/harsh-1-code"><b>Harsh Kumar</b></a>
+    </td>
+  </tr>
+</table>
 
 <p align="center">
   <a href="https://github.com/shaunmortal"><img src="https://img.shields.io/badge/Ayush%20Kumar-Contributor-2563EB?style=flat-square&logo=github&logoColor=white" alt="Ayush Kumar, contributor" /></a>
